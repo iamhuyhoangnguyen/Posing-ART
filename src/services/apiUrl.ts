@@ -1,4 +1,7 @@
-const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+const configuredBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? "https://posing-art.onrender.com" : "")
+).trim().replace(/\/+$/, "");
 
 /** Build a server URL while keeping ordinary web builds same-origin by default. */
 export function serverUrl(path: string): string {

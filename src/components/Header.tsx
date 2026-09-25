@@ -80,9 +80,9 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   return (
-    <header className="pt-4 pb-3 px-4 max-w-2xl mx-auto border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md sticky top-0 z-30 transition-colors">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+    <header className="pt-3 sm:pt-4 pb-3 px-3 sm:px-4 w-full max-w-2xl mx-auto border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md sticky top-0 z-30 transition-colors">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
           {showBack && onBackToHome ? (
             <button
               onClick={onBackToHome}
@@ -96,9 +96,9 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="font-extrabold text-xl tracking-tight text-zinc-900 dark:text-zinc-50">
+              <h1 className="font-extrabold text-base sm:text-xl leading-tight tracking-tight text-zinc-900 dark:text-zinc-50 break-words">
                 {title}
               </h1>
               {/* Online / Offline status badge */}
@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
                     ? "Đang kết nối: Có thể dùng toàn bộ tính năng AI và tải ảnh trực tuyến"
                     : "Đang ngoại tuyến: Mọi dữ liệu tư thế & ảnh lưu máy hoạt động bình thường"
                 }
-                className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                   isOnline
                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-900/50"
                     : "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/50"
@@ -126,14 +126,14 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={onOpenUpdate}
                   title="Kiểm tra phiên bản & Cập nhật app"
-                  className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-amber-100 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 hover:text-amber-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                  className="hidden md:inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-amber-100 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 hover:text-amber-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 transition-colors"
                 >
                   v{APP_VERSION}
                 </button>
               )}
             </div>
             {subtitle && (
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+              <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400 font-medium">
                 {subtitle}
               </p>
             )}
@@ -141,11 +141,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Action icons */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5">
           <button
             onClick={onOpenAIGenerator}
             title="AI Studio Tạo Dáng Mẫu"
-            className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 transition-all flex items-center gap-1 text-xs font-semibold"
+            className="p-1.5 sm:p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 transition-all flex items-center gap-1 text-xs font-semibold"
           >
             <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
             <span className="hidden sm:inline">AI Studio</span>
@@ -155,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenInstallGuide}
               title="Tải & Cài đặt app về thiết bị (Hỗ trợ Ngoại tuyến 100%)"
-              className="group p-2 rounded-xl text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-900/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 transition-all flex items-center gap-1.5 text-xs font-semibold shadow-2xs active:scale-95"
+              className="group p-1.5 sm:p-2 rounded-xl text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200/70 dark:border-emerald-900/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/80 transition-all flex items-center gap-1.5 text-xs font-semibold shadow-2xs active:scale-95"
             >
               <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:translate-y-0.5 transition-transform" />
               <span className="hidden sm:inline">Cài App</span>
@@ -165,7 +165,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenAddCustom}
             title="Thêm dáng / concept riêng"
-            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -173,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenBackup}
             title="Sao lưu / Xuất file Offline"
-            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
           >
             <FolderArchive className="w-4 h-4" />
           </button>
@@ -181,7 +181,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onToggleDarkMode}
             title={darkMode ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}
-            className="p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
+            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
           >
             {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
           </button>
@@ -190,10 +190,11 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={handlePersonalClick}
               title="Cá nhân (Tài khoản, Liên kết AI, Đồng bộ & Cài đặt)"
-              className="p-2 rounded-xl text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors flex items-center gap-1.5"
+              aria-label="Mở mục Cá nhân và đăng nhập"
+              className="p-1.5 sm:p-2 rounded-xl text-zinc-700 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors flex items-center gap-1.5"
             >
               <User className="w-4 h-4" />
-              <span className="text-xs font-bold hidden sm:inline">Cá nhân</span>
+              <span className="text-xs font-bold">Cá nhân</span>
             </button>
           )}
         </div>

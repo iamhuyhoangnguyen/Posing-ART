@@ -474,7 +474,7 @@ export default function App() {
         onOpenPersonal={() => setShowPersonalModal(true)}
         onResetSession={handleResetSession}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        onToggleDarkMode={() => setDarkMode((current) => !current)}
       />
 
       {/* Main Content Area */}
@@ -1301,7 +1301,7 @@ export default function App() {
           setShowSettingsModal(false);
         }}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        onToggleDarkMode={() => setDarkMode((current) => !current)}
         totalPoses={stats.totalPoses}
         doneCount={stats.totalCompleted}
         totalPhotos={stats.totalPhotos}

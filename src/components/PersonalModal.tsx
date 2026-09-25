@@ -344,17 +344,17 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fadeIn">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl max-w-xl w-full max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Modal Top Bar */}
-        <div className="p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/60 dark:bg-zinc-900/60">
+        <div className="p-3 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/60 dark:bg-zinc-900/60">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
               <User className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-50">
+                <h2 className="text-base sm:text-lg font-black tracking-tight text-zinc-900 dark:text-zinc-50">
                   Cá Nhân & Cài Đặt
                 </h2>
                 {currentUser?.role === "admin" && (
@@ -363,7 +363,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400">
                 Tài khoản • Liên kết 3 AI • Đồng bộ Windows & Android • Ngoại tuyến
               </p>
             </div>
@@ -434,7 +434,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
         </div>
 
         {/* Tab Body Contents */}
-        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6">
           {/* ================================================= */}
           {/* TAB 1: TÀI KHOẢN & PHÂN QUYỀN (RBAC) */}
           {/* ================================================= */}
