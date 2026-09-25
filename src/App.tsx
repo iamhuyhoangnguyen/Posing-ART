@@ -1002,7 +1002,7 @@ export default function App() {
             </div>
 
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
-            {currentCategory && !searchQuery && (
+            {currentSection === "kyyeu" && currentCategory && !searchQuery && (
               <div className="relative rounded-3xl overflow-hidden h-36 sm:h-44 border border-zinc-200 dark:border-zinc-800 shadow-sm group">
                 <img
                   src={
