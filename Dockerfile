@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json .npmrc bun.lock ./
 RUN npm install
 
 COPY . .
