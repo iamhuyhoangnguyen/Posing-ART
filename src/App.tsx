@@ -444,7 +444,7 @@ export default function App() {
             : "Trợ Lý Sáng Tạo 3 Siêu AI: ChatGPT • Gemini • Claude"
         }
         showBack={currentSection !== "home"}
-        showProgressAndFilters={currentSection !== "canhan"}
+        showProgressAndFilters={currentSection !== "canhan" && currentSection !== "kyyeu"}
         onBackToHome={() => {
           setCurrentSection("home");
           setSearchQuery("");
@@ -820,14 +820,8 @@ export default function App() {
         {/* VIEW 3 & 4: PHẦN 1 • KỶ YẾU & PHẦN 2 • CONCEPT CÁ NHÂN */}
         {(currentSection === "kyyeu" || currentSection === "canhan") && (
           <div className="space-y-4 animate-fadeIn">
-            {/* Top Navigation Bar with Back & Stats */}
-            <div className="flex items-center justify-between gap-3">
-              <button
-                onClick={() => setCurrentSection("home")}
-                className="px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all flex items-center gap-1.5"
-              >
-                ← Về menu
-              </button>
+            {/* Current section and completion summary */}
+            <div className="flex justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                   {currentSection === "kyyeu" ? "Phần 1 • Kỷ Yếu" : "Phần 2 • Concept Cá Nhân"}
