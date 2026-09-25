@@ -14,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set("trust proxy", 1);
 const PORT = Number(process.env.PORT) || 3000;
 const configuredCorsOrigins = new Set(
   (process.env.CORS_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean),
@@ -113,6 +114,7 @@ interface StoredUser {
 
 interface CloudDriveData {
   adminPin: string;
+  adminPinEnvFingerprint?: string;
   users: StoredUser[];
   photos: CloudPhotoItem[];
   records: UserCloudRecord[];
@@ -128,6 +130,11 @@ interface CloudDriveData {
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.resolve(__dirname, "data"));
 const STORE_PATH = path.resolve(DATA_DIR, "cloud_drive_store.json");
 fs.mkdirSync(DATA_DIR, { recursive: true });
+if (process.env.NODE_ENV === "production") {
+  console.warn(
+    `[Storage] Production DATA_DIR is "${DATA_DIR}". Confirm this path is mounted on a Render Persistent Disk; local filesystem data can be erased on redeploy or restart.`,
+  );
+}
 
 function persistCloudStore(data: unknown): void {
   const tempPath = `${STORE_PATH}.${process.pid}.tmp`;
@@ -140,6 +147,9 @@ const rawAdminPassword = process.env.ADMIN_PASSWORD || "";
 const ADMIN_PASSWORD = rawAdminPassword.startsWith("replace-") ? "" : rawAdminPassword;
 const rawAdminPin = process.env.ADMIN_PIN || "";
 const INITIAL_ADMIN_PIN = rawAdminPin.startsWith("replace-") ? "" : rawAdminPin;
+const ADMIN_PIN_ENV_FINGERPRINT = INITIAL_ADMIN_PIN
+  ? createHmac("sha256", TOKEN_SECRET).update(INITIAL_ADMIN_PIN).digest("hex")
+  : "";
 if (process.env.NODE_ENV === "production" && (!ADMIN_USERNAME || ADMIN_PASSWORD.length < 12 || INITIAL_ADMIN_PIN.length < 12 || rawAdminPassword.startsWith("replace-") || rawAdminPin.startsWith("replace-"))) {
   throw new Error("Set ADMIN_USERNAME and use ADMIN_PASSWORD/ADMIN_PIN with at least 12 characters in production.");
 }
@@ -245,7 +255,13 @@ app.use("/api/ai", rateLimit(20, 60 * 60 * 1000));
 
 app.get("/api/health", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ status: "ok", timestamp: Date.now() });
+  const now = Date.now();
+  res.json({
+    status: "ok",
+    hasApiKey: Boolean(process.env.GEMINI_API_KEY),
+    timestamp: now,
+    time: new Date(now).toISOString(),
+  });
 });
 
 function ensureStoreExists(): CloudDriveData {
@@ -296,7 +312,13 @@ function ensureStoreExists(): CloudDriveData {
     }
   });
   if (data.adminPin && !data.adminPin.startsWith("scrypt$")) data.adminPin = "";
-  if (!data.adminPin && INITIAL_ADMIN_PIN.length >= 12) data.adminPin = hashPassword(INITIAL_ADMIN_PIN);
+  if (INITIAL_ADMIN_PIN.length >= 12) {
+    if (!data.adminPin || data.adminPinEnvFingerprint !== ADMIN_PIN_ENV_FINGERPRINT) {
+      data.adminPin = hashPassword(INITIAL_ADMIN_PIN);
+      data.adminPinEnvFingerprint = ADMIN_PIN_ENV_FINGERPRINT;
+      console.info("[Admin PIN] Stored PIN synchronized with the current ADMIN_PIN environment value.");
+    }
+  }
 
   // Administrator credentials are provisioned only from server-side environment values.
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
@@ -906,15 +928,6 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Health check endpoint
-app.get("/api/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    hasApiKey: Boolean(process.env.GEMINI_API_KEY),
-    time: new Date().toISOString(),
-  });
-});
-
 // 1. Analyze Pose using gemini-3.1-pro-preview
 app.post("/api/ai/creative-chat", async (req, res) => {
   try {
@@ -1261,7 +1274,7 @@ app.post("/api/ai/generate-pose", async (req, res) => {
       }
 
       const imgResponse = await ai.models.generateContent({
-        model: "gemini-3.1-flash-image-preview",
+        model: "gemini-3.1-flash-image",
         contents: { parts: imageParts },
         config: {
           imageConfig: {
