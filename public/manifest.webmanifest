@@ -1,0 +1,25 @@
+{
+  "name": "POSING ART — Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh",
+  "short_name": "POSING ART",
+  "description": "Sổ tay tra cứu tư thế chụp ảnh kỷ yếu và concept cá nhân, quản lý tiến độ buổi chụp, đồng bộ đám mây đa nền tảng Web, Windows, Android.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=192&q=80",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=512&q=80",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["photography", "utilities", "productivity"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "POSING — Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh",
+  "description": "Sổ tay tra cứu tư thế chụp ảnh kỷ yếu và concept cá nhân, quản lý tiến độ buổi chụp thực tế, lưu trữ ảnh mẫu ngoại tuyến và trợ lý AI phân tích dáng chụp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

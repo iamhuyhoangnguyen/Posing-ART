@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">POSING ART</string>
+    <string name="title_activity_main">POSING ART</string>
+    <string name="package_name">com.posingart.app</string>
+    <string name="custom_url_scheme">com.posingart.app</string>
+</resources>

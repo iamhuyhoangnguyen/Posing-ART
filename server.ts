@@ -1,0 +1,1329 @@
+import express from "express";
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { fileURLToPath } from "url";
+import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
+import { buildPoseGeneratorPrompt, parsePoseGeneratorResponse, generateSmartFallbackPose } from "./src/services/poseGeneratorService";
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = Number(process.env.PORT) || 3000;
+const configuredCorsOrigins = new Set(
+  (process.env.CORS_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean),
+);
+const nativeCorsOrigins = new Set([
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+  "tauri://localhost",
+  "http://tauri.localhost",
+  "https://tauri.localhost",
+]);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowed = !origin || nativeCorsOrigins.has(origin) || configuredCorsOrigins.has(origin);
+  if (origin && allowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type,X-User-Id,X-Admin-Pin");
+    res.setHeader("Access-Control-Max-Age", "600");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(allowed ? 204 : 403);
+  next();
+});
+
+const configuredTokenSecret = process.env.AUTH_TOKEN_SECRET || "";
+const TOKEN_SECRET = configuredTokenSecret && !configuredTokenSecret.startsWith("replace-")
+  ? configuredTokenSecret
+  : randomBytes(32).toString("hex");
+if (process.env.NODE_ENV === "production" && (configuredTokenSecret.length < 32 || configuredTokenSecret.startsWith("replace-"))) {
+  throw new Error("AUTH_TOKEN_SECRET must be configured in production.");
+}
+
+// Increase payload limits for base64 images
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+// ==========================================
+// SHARED CLOUD DRIVE PERSISTENT STORAGE (RBAC)
+// ==========================================
+interface CloudPhotoItem {
+  id: string;
+  ownerUserId?: string;
+  localPhotoId?: string;
+  poseKey: string;
+  dataUrl: string;
+  note?: string;
+  uploadedBy?: string;
+  uploaderRole?: "admin" | "member";
+  status?: "approved" | "pending";
+  createdAt: number;
+}
+
+export interface UserCloudRecord {
+  id: string;
+  userId: string;
+  type: "favorite" | "savedPose" | "collection" | "generatedIdea" | "personalConcept" | "setting" | "profile";
+  data: any;
+  createdAt: number;
+  updatedAt: number;
+  isDeleted?: boolean;
+}
+
+const USER_RECORD_TYPES = new Set<UserCloudRecord["type"]>([
+  "favorite", "savedPose", "collection", "generatedIdea", "personalConcept", "setting", "profile",
+]);
+const MAX_USER_RECORD_BYTES = 5 * 1024 * 1024;
+
+function isValidUserCloudRecord(record: unknown): record is UserCloudRecord {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const item = record as Partial<UserCloudRecord>;
+  if (typeof item.id !== "string" || !item.id.trim() || item.id.length > 256) return false;
+  if (!item.type || !USER_RECORD_TYPES.has(item.type)) return false;
+  if (!item.data || typeof item.data !== "object") return false;
+  if (!Number.isFinite(item.createdAt) || !Number.isFinite(item.updatedAt)) return false;
+  if ((item.createdAt as number) <= 0 || (item.updatedAt as number) <= 0) return false;
+  if (item.isDeleted !== undefined && typeof item.isDeleted !== "boolean") return false;
+  try {
+    return Buffer.byteLength(JSON.stringify(item) || "", "utf8") <= MAX_USER_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+interface StoredUser {
+  id: string;
+  username: string;
+  passwordHash: string;
+  name: string;
+  role: "admin" | "member";
+  authType: "credentials" | "google" | "facebook";
+  avatar?: string;
+  createdAt: number;
+}
+
+interface CloudDriveData {
+  adminPin: string;
+  users: StoredUser[];
+  photos: CloudPhotoItem[];
+  records: UserCloudRecord[];
+  customPoses: Array<{
+    section: string;
+    categoryId: string;
+    pose: any;
+  }>;
+  customCategories: any[];
+  updatedAt: number;
+}
+
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.resolve(__dirname, "data"));
+const STORE_PATH = path.resolve(DATA_DIR, "cloud_drive_store.json");
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+function persistCloudStore(data: unknown): void {
+  const tempPath = `${STORE_PATH}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
+  fs.renameSync(tempPath, STORE_PATH);
+}
+
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME?.trim() || "";
+const rawAdminPassword = process.env.ADMIN_PASSWORD || "";
+const ADMIN_PASSWORD = rawAdminPassword.startsWith("replace-") ? "" : rawAdminPassword;
+const rawAdminPin = process.env.ADMIN_PIN || "";
+const INITIAL_ADMIN_PIN = rawAdminPin.startsWith("replace-") ? "" : rawAdminPin;
+if (process.env.NODE_ENV === "production" && (!ADMIN_USERNAME || ADMIN_PASSWORD.length < 12 || INITIAL_ADMIN_PIN.length < 12 || rawAdminPassword.startsWith("replace-") || rawAdminPin.startsWith("replace-"))) {
+  throw new Error("Set ADMIN_USERNAME and use ADMIN_PASSWORD/ADMIN_PIN with at least 12 characters in production.");
+}
+
+interface AuthClaims {
+  sub: string;
+  role: "admin" | "member";
+  exp: number;
+}
+
+function hashPassword(value: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const derived = scryptSync(value, salt, 64).toString("hex");
+  return `scrypt$${salt}$${derived}`;
+}
+
+function verifyPassword(value: string, stored: string): boolean {
+  const [scheme, salt, hash] = stored.split("$");
+  if (scheme !== "scrypt" || !salt || !hash) return false;
+  try {
+    const expected = Buffer.from(hash, "hex");
+    const actual = scryptSync(value, salt, expected.length);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
+}
+
+function createAuthToken(user: Pick<StoredUser, "id" | "role">): string {
+  const payload = Buffer.from(JSON.stringify({
+    sub: user.id,
+    role: user.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+  } satisfies AuthClaims)).toString("base64url");
+  const signature = createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function getAuthenticatedUser(req: express.Request): StoredUser | null {
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", TOKEN_SECRET).update(payload).digest();
+  const received = Buffer.from(signature, "base64url");
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AuthClaims;
+    if (!claims.sub || claims.exp <= Math.floor(Date.now() / 1000)) return null;
+    const user = cloudStore.users.find((candidate) => candidate.id === claims.sub);
+    return user && user.role === claims.role ? user : null;
+  } catch {
+    return null;
+  }
+}
+
+function requireUser(req: express.Request, res: express.Response): StoredUser | null {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ success: false, error: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn" });
+    return null;
+  }
+  return user;
+}
+
+function requireAdmin(req: express.Request, res: express.Response): StoredUser | null {
+  const user = requireUser(req, res);
+  if (user && user.role !== "admin") {
+    res.status(403).json({ success: false, error: "Chỉ quản trị viên được phép thực hiện thao tác này" });
+    return null;
+  }
+  return user?.role === "admin" ? user : null;
+}
+
+function rateLimit(maxRequests: number, windowMs: number): express.RequestHandler {
+  const attempts = new Map<string, { count: number; resetAt: number }>();
+  return (req, res, next) => {
+    const key = req.ip || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    let bucket = attempts.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      attempts.set(key, bucket);
+    }
+    bucket.count += 1;
+    if (bucket.count > maxRequests) {
+      res.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
+      return res.status(429).json({ success: false, error: "Bạn thao tác quá nhanh. Vui lòng thử lại sau." });
+    }
+    if (attempts.size > 5000) {
+      for (const [attemptKey, value] of attempts) {
+        if (value.resetAt <= now) attempts.delete(attemptKey);
+      }
+    }
+    next();
+  };
+}
+
+app.use("/api/auth/login", rateLimit(10, 15 * 60 * 1000));
+app.use("/api/auth/register", rateLimit(10, 60 * 60 * 1000));
+app.use("/api/auth/social", rateLimit(10, 15 * 60 * 1000));
+app.use("/api/cloud/admin/login", rateLimit(5, 15 * 60 * 1000));
+app.use("/api/ai", rateLimit(20, 60 * 60 * 1000));
+
+app.get("/api/health", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ status: "ok", timestamp: Date.now() });
+});
+
+function ensureStoreExists(): CloudDriveData {
+  let data: CloudDriveData | null = null;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(STORE_PATH)) {
+      const content = fs.readFileSync(STORE_PATH, "utf-8");
+      data = JSON.parse(content);
+    }
+  } catch (err) {
+    console.error("Error reading cloud drive store:", err);
+  }
+
+  if (!data) {
+    data = {
+      adminPin: "",
+      users: [],
+      photos: [],
+      records: [],
+      customPoses: [],
+      customCategories: [],
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (!data.users) data.users = [];
+  if (!data.photos) data.photos = [];
+  if (!data.records) data.records = [];
+  if (!data.customPoses) data.customPoses = [];
+
+  // Remove access tokens accidentally embedded in profile sync records by
+  // older clients before the migrated store is written back to disk.
+  for (const record of data.records) {
+    if (record.type !== "profile" || !record.data || typeof record.data !== "object") continue;
+    if (Object.prototype.hasOwnProperty.call(record.data, "token")) {
+      const { token: _oldToken, ...safeProfile } = record.data;
+      record.data = safeProfile;
+    }
+  }
+
+  // Upgrade credentials saved in plaintext by older app versions.
+  data.users.forEach((user) => {
+    if (user.passwordHash && !user.passwordHash.startsWith("scrypt$")) {
+      user.passwordHash = hashPassword(user.passwordHash);
+    }
+  });
+  if (data.adminPin && !data.adminPin.startsWith("scrypt$")) data.adminPin = "";
+  if (!data.adminPin && INITIAL_ADMIN_PIN.length >= 12) data.adminPin = hashPassword(INITIAL_ADMIN_PIN);
+
+  // Administrator credentials are provisioned only from server-side environment values.
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    data.users.forEach((user) => {
+      if (user.role === "admin") {
+        user.passwordHash = hashPassword(randomBytes(32).toString("hex"));
+        user.role = "member";
+      }
+    });
+  }
+  if (ADMIN_USERNAME && ADMIN_PASSWORD) {
+    const admin = data.users.find((u) => u.username.toLowerCase() === ADMIN_USERNAME.toLowerCase())
+      || data.users.find((u) => u.role === "admin");
+    if (admin) {
+      data.users.forEach((user) => {
+        if (user !== admin && user.role === "admin") {
+          user.passwordHash = hashPassword(randomBytes(32).toString("hex"));
+          user.role = "member";
+        }
+      });
+      admin.username = ADMIN_USERNAME;
+      admin.passwordHash = hashPassword(ADMIN_PASSWORD);
+      admin.role = "admin";
+    } else {
+      data.users.unshift({
+        id: `admin-${randomBytes(12).toString("hex")}`,
+        username: ADMIN_USERNAME,
+        passwordHash: hashPassword(ADMIN_PASSWORD),
+        name: "Quản trị viên",
+        role: "admin",
+        authType: "credentials",
+        createdAt: Date.now(),
+      });
+    }
+  }
+
+  // Ensure default photos have status: "approved"
+  data.photos.forEach((p) => {
+    if (!p.status) p.status = "approved";
+  });
+
+  try {
+    persistCloudStore(data);
+  } catch (e) {
+    console.error("Error writing cloud drive store:", e);
+  }
+  return data;
+}
+
+let cloudStore = ensureStoreExists();
+
+function saveStore() {
+  try {
+    cloudStore.updatedAt = Date.now();
+    persistCloudStore(cloudStore);
+  } catch (err) {
+    console.error("Error saving cloud drive store:", err);
+  }
+}
+
+// ==========================================
+// USER AUTHENTICATION & SUB-ACCOUNTS (RBAC)
+// ==========================================
+
+// Login endpoint: every account receives a server-signed, expiring access token.
+app.post("/api/auth/login", (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: "Vui lòng nhập tên tài khoản và mật khẩu" });
+    }
+
+    const cleanUser = String(username).trim();
+    const cleanPass = String(password).trim();
+
+    const user = cloudStore.users.find(
+      (u) => u.username.toLowerCase() === cleanUser.toLowerCase() && verifyPassword(cleanPass, u.passwordHash)
+    );
+
+    if (user) {
+      const token = createAuthToken(user);
+      const { passwordHash, ...safeUser } = user;
+      return res.json({
+        success: true,
+        user: { ...safeUser, token },
+        token,
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      error: "Tài khoản hoặc mật khẩu không chính xác",
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Register sub-account: NO Gmail or external account needed
+app.post("/api/auth/register", (req, res) => {
+  try {
+    const { username, password, name } = req.body;
+    const cleanUser = String(username || "").trim();
+    const cleanPass = String(password || "").trim();
+    const cleanName = String(name || cleanUser).trim();
+
+    if (!cleanUser || cleanUser.length < 3) {
+      return res.status(400).json({ success: false, error: "Tên đăng nhập phải từ 3 ký tự trở lên" });
+    }
+    if (!cleanPass || cleanPass.length < 10) {
+      return res.status(400).json({ success: false, error: "Mật khẩu phải từ 10 ký tự trở lên" });
+    }
+    if (ADMIN_USERNAME && cleanUser.toLowerCase() === ADMIN_USERNAME.toLowerCase()) {
+      return res.status(400).json({ success: false, error: "Tên tài khoản này đã được dành riêng cho Admin" });
+    }
+
+    const exists = cloudStore.users.some(
+      (u) => u.username.toLowerCase() === cleanUser.toLowerCase()
+    );
+    if (exists) {
+      return res.status(400).json({ success: false, error: "Tên tài khoản đã tồn tại, vui lòng chọn tên khác" });
+    }
+
+    const newUser: StoredUser = {
+      id: `user-${randomBytes(16).toString("hex")}`,
+      username: cleanUser,
+      passwordHash: hashPassword(cleanPass),
+      name: cleanName || cleanUser,
+      role: "member",
+      authType: "credentials",
+      avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80",
+      createdAt: Date.now(),
+    };
+
+    cloudStore.users.push(newUser);
+    saveStore();
+
+    const token = createAuthToken(newUser);
+    const { passwordHash, ...safeUser } = newUser;
+    return res.json({
+      success: true,
+      user: { ...safeUser, token },
+      token,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Social login is disabled until an OAuth provider can verify the user identity.
+app.post("/api/auth/social", (req, res) => {
+  res.status(501).json({ success: false, error: "Đăng nhập mạng xã hội chưa được cấu hình" });
+});
+
+// 1. Cloud Drive Status
+app.get("/api/cloud/status", (_req, res) => {
+  const pendingCount = cloudStore.photos.filter((p) => p.status === "pending").length;
+  res.json({
+    success: true,
+    connected: true,
+    photosCount: cloudStore.photos.length,
+    pendingPhotosCount: pendingCount,
+    customPosesCount: cloudStore.customPoses.length,
+    usersCount: cloudStore.users.length,
+    updatedAt: cloudStore.updatedAt,
+  });
+});
+
+// 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
+app.get("/api/cloud/sync", (_req, res) => {
+  const approvedPhotos = cloudStore.photos
+    .filter((photo) => photo.status === "approved")
+    .map(({ id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status, createdAt }) => ({
+      id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status, createdAt,
+    }));
+  res.json({
+    success: true,
+    photos: approvedPhotos,
+    customPoses: cloudStore.customPoses,
+    customCategories: cloudStore.customCategories,
+    updatedAt: cloudStore.updatedAt,
+  });
+});
+
+// 3. Upload Photo to Cloud Drive
+// Sub-accounts uploads are tagged as "pending" for admin approval
+app.post("/api/cloud/upload-photo", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const { poseKey, dataUrl, note, uploadedBy, localPhotoId } = req.body;
+    if (!poseKey || !dataUrl) {
+      return res.status(400).json({ error: "Thiếu dữ liệu poseKey hoặc ảnh dataUrl" });
+    }
+    if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp|gif);base64,/i.test(dataUrl) || dataUrl.length > 20_000_000) {
+      return res.status(400).json({ error: "Ảnh không hợp lệ hoặc vượt quá dung lượng cho phép" });
+    }
+    if (typeof localPhotoId === "string" && localPhotoId.length > 128) {
+      return res.status(400).json({ error: "Mã ảnh cục bộ không hợp lệ" });
+    }
+    const existingPhoto = typeof localPhotoId === "string"
+      ? cloudStore.photos.find((photo) => photo.ownerUserId === user.id && photo.localPhotoId === localPhotoId)
+      : undefined;
+    if (existingPhoto) return res.json({ success: true, photo: existingPhoto, duplicate: true });
+
+    const role = user.role;
+    const initialStatus = role === "admin" ? "approved" : "pending";
+
+    const newPhoto: CloudPhotoItem = {
+      id: `cloud_photo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      ownerUserId: user.id,
+      localPhotoId: typeof localPhotoId === "string" ? localPhotoId : undefined,
+      poseKey,
+      dataUrl,
+      note: note || "",
+      uploadedBy: user.name || uploadedBy || "Thành viên",
+      uploaderRole: role,
+      status: initialStatus,
+      createdAt: Date.now(),
+    };
+
+    cloudStore.photos.unshift(newPhoto);
+    saveStore();
+
+    res.json({ success: true, photo: newPhoto });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Lỗi lưu ảnh lên Cloud Drive" });
+  }
+});
+
+// 3B. Get Pending Photos for Admin Approval
+app.get("/api/cloud/photos/pending", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const pending = cloudStore.photos.filter((p) => p.status === "pending");
+  res.json({ success: true, pending });
+});
+
+// 3C. Approve Photo (ADMIN ONLY)
+app.post("/api/cloud/photo/:id/approve", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { id } = req.params;
+  const photo = cloudStore.photos.find((p) => p.id === id);
+  if (!photo) {
+    return res.status(404).json({ error: "Không tìm thấy ảnh" });
+  }
+  photo.status = "approved";
+  saveStore();
+  res.json({ success: true, photo });
+});
+
+// 3D. Approve All Pending Photos (ADMIN ONLY)
+app.post("/api/cloud/photos/approve-all", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  let approvedCount = 0;
+  cloudStore.photos.forEach((p) => {
+    if (p.status === "pending") {
+      p.status = "approved";
+      approvedCount++;
+    }
+  });
+  if (approvedCount > 0) saveStore();
+  res.json({ success: true, approvedCount });
+});
+
+// 4. Add Custom Pose to Cloud Drive (ALLOWED FOR EVERYONE)
+app.post("/api/cloud/add-pose", (req, res) => {
+  try {
+    if (!requireUser(req, res)) return;
+    const { section, categoryId, pose } = req.body;
+    if (!pose || !pose.id) {
+      return res.status(400).json({ error: "Thiếu dữ liệu tư thế" });
+    }
+
+    cloudStore.customPoses.unshift({ section, categoryId, pose });
+    saveStore();
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Admin Login Verification
+app.post("/api/cloud/admin/login", (req, res) => {
+  const { pin } = req.body;
+  if (!pin) {
+    return res.status(400).json({ success: false, error: "Vui lòng nhập mã PIN" });
+  }
+  const admin = cloudStore.users.find((user) => user.role === "admin");
+  if (admin && cloudStore.adminPin && verifyPassword(String(pin), cloudStore.adminPin)) {
+    return res.json({
+      success: true,
+      token: createAuthToken(admin),
+    });
+  }
+  res.status(401).json({ success: false, error: "Mã PIN Quản trị viên không chính xác" });
+});
+
+// 6. Change Admin PIN (REQUIRES ADMIN)
+app.post("/api/cloud/admin/change-pin", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { newPin } = req.body;
+  if (typeof newPin !== "string" || newPin.trim().length < 12) {
+    return res.status(400).json({ error: "Mã PIN mới phải từ 12 ký tự trở lên" });
+  }
+  cloudStore.adminPin = hashPassword(newPin.trim());
+  saveStore();
+  res.json({ success: true, message: "Đã cập nhật mã PIN Admin thành công" });
+});
+
+// 7. Delete Photo from Cloud Drive (STRICTLY REQUIRES ADMIN)
+app.delete("/api/cloud/photo/:id", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { id } = req.params;
+  const initialLen = cloudStore.photos.length;
+  cloudStore.photos = cloudStore.photos.filter((p) => p.id !== id);
+  if (cloudStore.photos.length !== initialLen) {
+    saveStore();
+  }
+  res.json({ success: true });
+});
+
+// 8. Delete Custom Pose from Cloud Drive (STRICTLY REQUIRES ADMIN)
+app.delete("/api/cloud/pose/:id", (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { id } = req.params;
+  cloudStore.customPoses = cloudStore.customPoses.filter((cp) => cp.pose.id !== id);
+  saveStore();
+  res.json({ success: true });
+});
+
+// ==========================================
+// CENTRALIZED VERSION & MULTI-PLATFORM UPDATE
+// ==========================================
+const CURRENT_APP_VERSION = "1.1.0";
+const MINIMUM_SUPPORTED_VERSION = "1.0.0";
+const WINDOWS_DOWNLOAD_URL = (process.env.WINDOWS_DOWNLOAD_URL || "").trim();
+const ANDROID_DOWNLOAD_URL = (process.env.ANDROID_DOWNLOAD_URL || "").trim();
+
+app.get("/api/version", (req, res) => {
+  const clientVer = (req.query.clientVersion as string) || "1.0.0";
+  const platform = (req.query.platform as string) || "web";
+
+  const isClientOutdated = clientVer !== CURRENT_APP_VERSION;
+
+  res.json({
+    currentVersion: CURRENT_APP_VERSION,
+    minimumVersion: MINIMUM_SUPPORTED_VERSION,
+    releaseDate: "2026-09-24",
+    releaseNotes: [
+      "Kiến trúc Đa Nền Tảng duy nhất: Web/PWA, Windows (.exe) và Android (.apk) đồng bộ hoàn toàn.",
+      "Hệ thống Cơ sở Dữ liệu Đám Mây đồng nhất: Favorites, Saved Poses, Collections, Concepts và AI Ideas.",
+      "Cơ chế giải quyết xung đột Last-Write-Wins bảo đảm toàn vẹn dữ liệu giữa nhiều thiết bị.",
+      "Tối ưu hóa bộ nhớ đệm Cache ngoại tuyến khi mất kết nối mạng.",
+      "Hỗ trợ cập nhật phiên bản 1-chạm cho Windows và Android.",
+    ],
+    windows: {
+      updateAvailable: platform === "windows" && isClientOutdated && Boolean(WINDOWS_DOWNLOAD_URL),
+      version: CURRENT_APP_VERSION,
+      downloadUrl: WINDOWS_DOWNLOAD_URL,
+      instructions: "Tải file POSING_ART_Setup.exe và chạy cài đặt để cập nhật phiên bản mới nhất.",
+    },
+    android: {
+      updateAvailable: platform === "android" && isClientOutdated && Boolean(ANDROID_DOWNLOAD_URL),
+      version: CURRENT_APP_VERSION,
+      downloadUrl: ANDROID_DOWNLOAD_URL,
+      instructions: "Tải file POSING_ART.apk, mở file và chọn Cài đặt (Cho phép cài đặt từ nguồn tin cậy nếu có yêu cầu).",
+    },
+    web: {
+      updateAvailable: platform === "web" && isClientOutdated,
+      version: CURRENT_APP_VERSION,
+    },
+  });
+});
+
+// ==========================================
+// USER CLOUD DATA SYNCHRONIZATION (PHẦN 4, 5, 6, 7)
+// Shared dataset across Web, Windows, Android
+// ==========================================
+
+// 1. Get all cloud records for user (incremental with ?since=timestamp)
+app.get("/api/user/sync", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const requestedUserId = (req.query.userId as string) || (req.headers["x-user-id"] as string);
+    if (requestedUserId && requestedUserId !== user.id) {
+      return res.status(403).json({ success: false, error: "Không có quyền truy cập dữ liệu tài khoản khác" });
+    }
+    const userId = user.id;
+    const since = Number(req.query.since) || 0;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "Thiếu thông tin userId" });
+    }
+
+    if (!cloudStore.records) {
+      cloudStore.records = [];
+    }
+
+    // Filter active records for this user modified since requested timestamp
+    const records = cloudStore.records.filter(
+      (r) => r.userId === userId && r.updatedAt >= since
+    );
+
+    res.json({
+      success: true,
+      records,
+      serverTime: Date.now(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Push & merge user cloud records with Last-Write-Wins conflict resolution
+app.post("/api/user/sync", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const { userId: requestedUserId, records } = req.body;
+    if (requestedUserId && requestedUserId !== user.id) {
+      return res.status(403).json({ success: false, error: "Không có quyền đồng bộ dữ liệu tài khoản khác" });
+    }
+    if (!Array.isArray(records)) {
+      return res.status(400).json({ success: false, error: "Thiếu dữ liệu đồng bộ userId hoặc records" });
+    }
+    if (records.length > 1000) {
+      return res.status(413).json({ success: false, error: "Mỗi lần đồng bộ hỗ trợ tối đa 1000 mục" });
+    }
+    if (!records.every(isValidUserCloudRecord)) {
+      return res.status(400).json({ success: false, error: "Có bản ghi đồng bộ không hợp lệ hoặc vượt quá dung lượng cho phép" });
+    }
+    const userId = user.id;
+
+    if (!cloudStore.records) {
+      cloudStore.records = [];
+    }
+
+    const conflicts: UserCloudRecord[] = [];
+    let updatedCount = 0;
+
+    for (const incoming of records as UserCloudRecord[]) {
+      const existingIdx = cloudStore.records.findIndex(
+        (r) => r.id === incoming.id && r.userId === userId
+      );
+
+      if (existingIdx >= 0) {
+        const existing = cloudStore.records[existingIdx];
+        // Last-Write-Wins: compare updatedAt
+        if (incoming.updatedAt >= existing.updatedAt) {
+          cloudStore.records[existingIdx] = {
+            ...incoming,
+            userId,
+          };
+          updatedCount++;
+        } else {
+          // Conflict: existing on server is newer
+          conflicts.push(existing);
+        }
+      } else {
+        cloudStore.records.push({
+          ...incoming,
+          userId,
+        });
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      saveStore();
+    }
+
+    res.json({
+      success: true,
+      updatedCount,
+      conflicts,
+      serverTime: Date.now(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Upsert single record
+app.post("/api/user/record", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const record = req.body as UserCloudRecord;
+    if (!isValidUserCloudRecord(record)) {
+      return res.status(400).json({ success: false, error: "Dữ liệu record không hợp lệ" });
+    }
+    if (record.userId && record.userId !== user.id) {
+      return res.status(403).json({ success: false, error: "Không có quyền sửa dữ liệu tài khoản khác" });
+    }
+    record.userId = user.id;
+
+    if (!cloudStore.records) {
+      cloudStore.records = [];
+    }
+
+    const existingIdx = cloudStore.records.findIndex(
+      (r) => r.id === record.id && r.userId === record.userId
+    );
+
+    const now = Date.now();
+    const itemToSave: UserCloudRecord = {
+      ...record,
+      updatedAt: record.updatedAt || now,
+      createdAt: record.createdAt || now,
+    };
+
+    if (existingIdx >= 0) {
+      const existing = cloudStore.records[existingIdx];
+      if (itemToSave.updatedAt >= existing.updatedAt) {
+        cloudStore.records[existingIdx] = itemToSave;
+        saveStore();
+      }
+    } else {
+      cloudStore.records.push(itemToSave);
+      saveStore();
+    }
+
+    res.json({ success: true, record: itemToSave });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Delete user record
+app.delete("/api/user/record/:id", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const { id } = req.params;
+    const requestedUserId = (req.query.userId as string) || (req.headers["x-user-id"] as string);
+    if (requestedUserId && requestedUserId !== user.id) {
+      return res.status(403).json({ success: false, error: "Không có quyền xóa dữ liệu tài khoản khác" });
+    }
+
+    if (!cloudStore.records) {
+      cloudStore.records = [];
+    }
+
+    const initialLen = cloudStore.records.length;
+    cloudStore.records = cloudStore.records.filter(
+      (r) => !(r.id === id && r.userId === user.id)
+    );
+
+    if (cloudStore.records.length !== initialLen) {
+      saveStore();
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. User dataset summary (counts for UI across Web, Windows, Android)
+app.get("/api/user/summary", (req, res) => {
+  try {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const requestedUserId = (req.query.userId as string) || (req.headers["x-user-id"] as string);
+    if (requestedUserId && requestedUserId !== user.id) {
+      return res.status(403).json({ success: false, error: "Không có quyền xem dữ liệu tài khoản khác" });
+    }
+    const userId = user.id;
+
+    if (!cloudStore.records) {
+      cloudStore.records = [];
+    }
+
+    const userRecords = cloudStore.records.filter((r) => r.userId === userId && !r.isDeleted);
+
+    const favs = userRecords.filter((r) => r.type === "favorite" && r.data?.isFavorite);
+    const poses = userRecords.filter((r) => r.type === "savedPose");
+    const collections = userRecords.filter((r) => r.type === "collection");
+    const ideas = userRecords.filter((r) => r.type === "generatedIdea");
+    const concepts = userRecords.filter((r) => r.type === "personalConcept");
+
+    res.json({
+      userId,
+      favoritesCount: favs.length,
+      savedPosesCount: poses.length,
+      collectionsCount: collections.length,
+      generatedIdeasCount: ideas.length,
+      personalConceptsCount: concepts.length,
+      lastSyncedAt: cloudStore.updatedAt,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+// Initialize Gemini Client
+const apiKey = process.env.GEMINI_API_KEY || "";
+const ai = new GoogleGenAI({
+  apiKey,
+  httpOptions: {
+    headers: {
+      "User-Agent": "aistudio-build",
+    },
+  },
+});
+
+// Health check endpoint
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    hasApiKey: Boolean(process.env.GEMINI_API_KEY),
+    time: new Date().toISOString(),
+  });
+});
+
+// 1. Analyze Pose using gemini-3.1-pro-preview
+app.post("/api/ai/creative-chat", async (req, res) => {
+  try {
+    const {
+      model = "chatgpt",
+      message,
+      image,
+      mimeType = "image/jpeg",
+    } = req.body;
+
+    if (!message && !image) {
+      return res.status(400).json({ error: "Vui lòng nhập câu hỏi hoặc gửi ảnh." });
+    }
+
+    const modelName = model === "claude" ? "Claude 3.7" : model === "gemini" ? "Gemini 2.5" : "ChatGPT (GPT-4o)";
+
+    const systemPrompt = `
+Bạn là Trợ Lý Sáng Tạo Ý Tưởng Nhiếp Ảnh & Tạo Dáng Chuyên Nghiệp đóng vai trò mô hình ${modelName}.
+Mục tiêu của bạn: Giải quyết tình trạng "Bí ý tưởng" cho nhiếp ảnh gia và người mẫu chụp Kỷ Yếu & Concept Cá Nhân theo phong cách THỰC CHIẾN TẠI HIỆN TRƯỜNG.
+
+Ngôn ngữ trả lời: Tiếng Việt tự nhiên, súc tích, thẩm mỹ, chuyên nghiệp, không dài dòng rườm rà.
+NGUYÊN TẮC:
+- Mọi hướng dẫn phải chuyển thành HÀNH ĐỘNG VẬT LÝ CỤ THỂ mà mẫu hoặc thợ ảnh thực hiện được ngay (vị trí tay, độ khép ngón tay, góc xoay vai, hướng mắt, hạ/nâng cằm, góc máy, hướng ánh sáng).
+- TUYỆT ĐỐI KHÔNG dùng lời khuyên sáo rỗng như: "hãy tạo dáng tự nhiên", "hãy dùng ánh sáng mềm", "hãy tạo cảm giác điện ảnh".
+- KHÔNG BỊA ĐẶT metadata máy ảnh/khẩu độ/tốc/ISO nếu người dùng không cung cấp; chỉ khuyến nghị tiêu cự và góc máy theo nguyên lý quang học.
+${
+  model === "chatgpt"
+    ? "Phong cách của bạn (ChatGPT): Thực chiến, kịch bản concept chi tiết, câu chuyện chụp ảnh độc đáo và các caption hay."
+    : model === "claude"
+    ? "Phong cách của bạn (Claude): Tinh tế, mỹ học cao cấp, cảm xúc ánh sáng nghệ thuật, bố cục chuẩn điện ảnh và tone màu."
+    : "Phong cách của bạn (Gemini): Đa phương thức thông minh, phân tích thị giác sắc bén, tối ưu góc máy, bối cảnh và mẹo hiện trường nhanh."
+}
+
+Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng định dạng Markdown rõ ràng):
+✨ **Ý TƯỞNG CONCEPT CHỦ ĐẠO** (Tóm tắt concept & cảm hứng)
+📸 **3 - 5 GỢI Ý DÁNG CHỤP CHI TIẾT** (Ghi rõ: tư thế vai/tay/ngón tay/chân, hướng nhìn mắt, biểu cảm)
+📐 **GÓC MÁY & BỐ CỤC KHUYÊN DÙNG** (Góc máy, khoảng cách, chiều cao đặt máy)
+💡 **ÁNH SÁNG & ĐẠO CỤ PHÙ HỢP** (Nguồn sáng, hướng sáng chính, phụ kiện cần chuẩn bị)
+🇨🇳 **TỪ KHÓA TÌM KIẾM REDNOTE (TIẾU HỒNG THƯ - TIẾNG TRUNG)** (Cung cấp 2-3 cụm từ tiếng Trung chuẩn xác kèm pinyin để người dùng tìm thêm ảnh trên Xiaohongshu)
+`;
+
+    if (!process.env.GEMINI_API_KEY) {
+      // Fallback creative response when API key is not yet set
+      const fallbackChinese = model === "claude" ? "法式复古人像写真 氛围感拍照姿势" : "女生写真创意 拍照姿势灵感 青春感";
+      return res.json({
+        success: true,
+        model,
+        reply: `### ✨ Ý TƯỞNG CONCEPT: ${message ? message.slice(0, 50) : "Sáng Tạo Mới"}\n\n` +
+          `**Phong cách ${modelName}:**\n` +
+          `1. **Dáng 1 - Góc Nghiêng Tự Nhiên**: Đứng chếch 45 độ, một tay vén nhẹ tóc mai, mắt nhìn hướng 2 giờ mỉm cười nhẹ. Trọng tâm dồn chân sau.\n` +
+          `2. **Dáng 2 - Tương Tác Với Đạo Cụ**: Cầm hoa hoặc sách che nhẹ 1/3 khuôn mặt, tạo sự bí ẩn và thu hút ánh nhìn vào đôi mắt.\n` +
+          `3. **Dáng 3 - Bắt Khoảnh Khắc Chuyển Động**: Bước đi chậm rãi, váy bay nhẹ, đầu ngoảnh lại nhìn máy ảnh theo phong cách "Candid".\n\n` +
+          `📐 **Góc Máy:** Ngang tầm mắt hoặc góc thấp 15 độ để tôn dáng dài.\n` +
+          `💡 **Ánh Sáng:** Tận dụng ánh sáng xiên lúc hoàng hôn (Golden Hour) hoặc hắt sáng tự nhiên.\n` +
+          `🇨🇳 **Từ khóa Rednote (Tiểu Hồng Thư):** \`${fallbackChinese}\`\n\n*(Bạn có thể kết nối thêm tài khoản web trực tiếp qua các nút bấm bên trên)*`,
+      });
+    }
+
+    const parts: any[] = [];
+
+    if (image) {
+      const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+      parts.push({
+        inlineData: {
+          mimeType,
+          data: cleanBase64,
+        },
+      });
+      parts.push({
+        text: `Dưới đây là hình ảnh do người dùng gửi lên. Hãy phân tích bối cảnh, trang phục, góc chụp của ảnh và kết hợp với câu hỏi: "${message || "Hãy gợi ý các dáng chụp sáng tạo dựa trên ảnh này"}".\n\n${systemPrompt}`,
+      });
+    } else {
+      parts.push({
+        text: `Câu hỏi / yêu cầu ý tưởng từ người dùng: "${message}".\n\n${systemPrompt}`,
+      });
+    }
+
+    let response: any = null;
+    const chatModels = ["gemini-3.6-flash", "gemini-3.8-flash"];
+    for (const m of chatModels) {
+      try {
+        response = await ai.models.generateContent({
+          model: m,
+          contents: { parts },
+        });
+        if (response?.text) break;
+      } catch (e: any) {
+        console.warn(`Chat model ${m} failed:`, e?.message);
+      }
+    }
+
+    if (!response || !response.text) {
+      throw new Error("Không thể kết nối đến mô hình AI lúc này.");
+    }
+
+    const reply = response.text || "Đã tạo ý tưởng thành công.";
+    res.json({
+      success: true,
+      model,
+      reply,
+    });
+  } catch (error: any) {
+    console.error("Creative chat error:", error);
+    res.status(500).json({
+      error: error.message || "Lỗi xử lý yêu cầu sáng tạo ý tưởng AI.",
+    });
+  }
+});
+
+// 1. Analyze Pose using Real-world Field Photography Assistant
+app.post("/api/ai/analyze-pose", async (req, res) => {
+  try {
+    const {
+      image,
+      mimeType = "image/jpeg",
+      poseTitle,
+      category,
+      contextNotes,
+      context,
+    } = req.body;
+
+    if (!image) {
+      return res.status(400).json({ error: "Vui lòng cung cấp hình ảnh để phân tích." });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({
+        error: "Chưa cấu hình API Key trên máy chủ.",
+      });
+    }
+
+    let actualMimeType = mimeType || "image/jpeg";
+    const dataUriMatch = image.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+    if (dataUriMatch && dataUriMatch[1]) {
+      actualMimeType = dataUriMatch[1];
+    }
+    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+
+    const promptText = buildPoseAdvisorPrompt({
+      poseTitle,
+      category,
+      contextNotes,
+      context,
+    });
+
+    const modelsToTry = [
+      "gemini-3.6-flash",
+      "gemini-3.6-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.8-flash",
+    ];
+    let response: any = null;
+    let lastError: any = null;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const modelCandidate = modelsToTry[i];
+      try {
+        if (i > 0) {
+          // Brief pause before retry/fallback to avoid demand spike
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        response = await ai.models.generateContent({
+          model: modelCandidate,
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: actualMimeType,
+                  data: cleanBase64,
+                },
+              },
+              {
+                text: promptText,
+              },
+            ],
+          },
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+        if (response && response.text) {
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI Pose Advisor] Attempt ${i + 1} (${modelCandidate}) failed:`, err?.status || err?.code, err?.message);
+      }
+    }
+
+    if (!response || !response.text) {
+      const errorMsg =
+        lastError?.status === 503 || lastError?.message?.includes("503")
+          ? "Hệ thống AI đang có lượng truy cập cao tạm thời. Vui lòng bấm 'Phân tích lại' sau vài giây."
+          : lastError?.message || "Không thể phân tích ảnh lúc này. Vui lòng thử lại sau.";
+      return res.status(503).json({ error: errorMsg });
+    }
+
+    const rawText = response.text || "";
+    const { structured, markdown } = parsePoseAdvisorResponse(rawText);
+
+    res.json({
+      success: true,
+      analysis: markdown,
+      structured,
+    });
+  } catch (error: any) {
+    console.error("Pose analysis error:", error);
+    res.status(500).json({
+      error: error.message || "Đã xảy ra lỗi khi phân tích ảnh tư thế.",
+    });
+  }
+});
+
+// 2. AI Pose Reference & Variation Engine (Gemini 3.6 Flash + Image Generation)
+app.post("/api/ai/generate-pose", async (req, res) => {
+  try {
+    const {
+      prompt,
+      referenceImage,
+      referencePoseTitle,
+      referenceCategory,
+      variationLevel = 1,
+      gender = "nu",
+      shotType = "full",
+      concept = "Kỷ yếu & Chân dung",
+      aspectRatio = "3:4",
+      mimeType,
+    } = req.body;
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({
+        error: "Chưa cấu hình API Key trên máy chủ.",
+      });
+    }
+
+    // Determine actual mimeType if base64 data URI
+    let actualMimeType = mimeType || "image/jpeg";
+    let cleanRefBase64 = "";
+    if (referenceImage) {
+      const dataUriMatch = referenceImage.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+      if (dataUriMatch && dataUriMatch[1]) {
+        actualMimeType = dataUriMatch[1];
+      }
+      cleanRefBase64 = referenceImage.replace(/^data:image\/\w+;base64,/, "").replace(/^data:[^;]+;base64,/, "");
+    }
+
+    // Step 1: Build Master Pose Director Prompt
+    const generatorPrompt = buildPoseGeneratorPrompt({
+      referencePoseTitle,
+      referenceCategory,
+      hasReferenceImage: !!cleanRefBase64,
+      variationLevel: Number(variationLevel) as 1 | 2 | 3,
+      gender,
+      shotType,
+      concept,
+      customInstructions: prompt,
+    });
+
+    const parts: any[] = [];
+    if (cleanRefBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: actualMimeType,
+          data: cleanRefBase64,
+        },
+      });
+    }
+    parts.push({
+      text: generatorPrompt,
+    });
+
+    // Step 2: Call Gemini to analyze reference & generate structured Pose Reference Blueprint
+    const modelsToTry = [
+      "gemini-3.6-flash",
+      "gemini-3.1-pro-preview",
+      "gemini-3.8-flash",
+    ];
+
+    let directorResponse: any = null;
+    let lastError: any = null;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const modelCandidate = modelsToTry[i];
+      try {
+        if (i > 0) {
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        directorResponse = await ai.models.generateContent({
+          model: modelCandidate,
+          contents: { parts },
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+        if (directorResponse && directorResponse.text) {
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI Pose Generator] Attempt with ${modelCandidate} failed:`, err?.status || err?.code, err?.message);
+      }
+    }
+
+    let poseData: any;
+    if (directorResponse && directorResponse.text) {
+      poseData = parsePoseGeneratorResponse(directorResponse.text);
+    } else {
+      console.warn("[AI Pose Generator] Live AI model busy; deploying intelligent geometric variation engine.");
+      poseData = generateSmartFallbackPose({
+        referencePoseTitle,
+        referenceCategory,
+        hasReferenceImage: !!cleanRefBase64,
+        variationLevel: Number(variationLevel) as 1 | 2 | 3,
+        gender,
+        shotType,
+        concept,
+        customInstructions: prompt,
+      });
+    }
+
+    // Step 3: Attempt to generate photorealistic reference image
+    let generatedImageUrl = "";
+    let captionText = "";
+
+    try {
+      const imagePromptToUse = poseData.imagePrompt ||
+        `Realistic professional photograph of a person posing: ${poseData.title}. Clean body lines, high learnability, neutral soft background, natural light, no text, no watermark.`;
+
+      const imageParts: any[] = [];
+      if (cleanRefBase64) {
+        imageParts.push({
+          inlineData: {
+            mimeType: actualMimeType,
+            data: cleanRefBase64,
+          },
+        });
+        imageParts.push({
+          text: `Modify the pose variation cleanly: ${imagePromptToUse}. High learnability, photorealistic, clear limbs, no text, no watermark.`,
+        });
+      } else {
+        imageParts.push({
+          text: imagePromptToUse,
+        });
+      }
+
+      const imgResponse = await ai.models.generateContent({
+        model: "gemini-3.1-flash-image-preview",
+        contents: { parts: imageParts },
+        config: {
+          imageConfig: {
+            aspectRatio: (aspectRatio as any) || "3:4",
+          },
+        },
+      });
+
+      const candidateParts = imgResponse.candidates?.[0]?.content?.parts || [];
+      for (const part of candidateParts) {
+        if (part.inlineData?.data) {
+          const mime = part.inlineData.mimeType || "image/png";
+          generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
+        } else if (part.text) {
+          captionText += part.text;
+        }
+      }
+    } catch (imgErr: any) {
+      // Image generation model quota (429) or model fallback
+      console.warn("[AI Pose Generator] Image model generation note:", imgErr?.message?.slice(0, 120));
+      captionText = "Dáng tham khảo đã được tính toán giải phẫu & hình học chuẩn xác.";
+    }
+
+    if (generatedImageUrl) {
+      poseData.imageUrl = generatedImageUrl;
+    } else if (referenceImage) {
+      poseData.imageUrl = referenceImage;
+    }
+
+    res.json({
+      success: true,
+      poseData,
+      imageUrl: generatedImageUrl || referenceImage || undefined,
+      caption: captionText || poseData.summary,
+    });
+  } catch (error: any) {
+    console.error("Pose generation master error:", error);
+    res.status(500).json({
+      error: error.message || "Đã xảy ra lỗi khi tạo biến thể dáng tham khảo.",
+    });
+  }
+});
+
+// Configure Vite in dev mode or static files in production
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    const { createServer } = await import("vite");
+    const vite = await createServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.resolve(__dirname, "dist")));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}
+
+startServer();

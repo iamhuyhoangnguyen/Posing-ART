@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+data/cloud_drive_store.json
+src-tauri/target/
+android/.gradle/
+android/local.properties
+android/app/build/
+.env*
+!.env.example
