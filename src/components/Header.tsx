@@ -21,6 +21,7 @@ interface HeaderProps {
   showBack?: boolean;
   title: string;
   subtitle?: string;
+  showProgressAndFilters?: boolean;
   completedCount: number;
   totalCount: number;
   filterStatus?: FilterStatus;
@@ -42,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   showBack,
   title,
   subtitle,
+  showProgressAndFilters = true,
   completedCount,
   totalCount,
   filterStatus = "all",
@@ -198,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Progress & Filters if in category view */}
-      {showBack && (
+      {showBack && showProgressAndFilters && (
         <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-900 flex flex-col gap-2">
           <div className="flex items-center justify-between text-xs font-medium">
             <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">

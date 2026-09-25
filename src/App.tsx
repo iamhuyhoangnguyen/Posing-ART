@@ -444,6 +444,7 @@ export default function App() {
             : "Trợ Lý Sáng Tạo 3 Siêu AI: ChatGPT • Gemini • Claude"
         }
         showBack={currentSection !== "home"}
+        showProgressAndFilters={currentSection !== "canhan"}
         onBackToHome={() => {
           setCurrentSection("home");
           setSearchQuery("");
