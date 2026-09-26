@@ -1,16 +1,10 @@
 import { Capacitor } from "@capacitor/core";
-import { Camera } from "@capacitor/camera";
+import { Camera, CameraResultType } from "@capacitor/camera";
 
-/**
- * Platform Detection and Native Bridge Abstraction
- * Handles platform differences transparently for Web, Windows (.exe / Tauri), and Android (.apk / Capacitor)
- */
-
-export type AppPlatform = "web" | "windows" | "android";
+export type AppPlatform = "web" | "android";
 
 export interface PlatformCapabilities {
   platform: AppPlatform;
-  isTauri: boolean;
   isCapacitor: boolean;
   isPWA: boolean;
   isMobileDevice: boolean;
@@ -18,35 +12,12 @@ export interface PlatformCapabilities {
   canInstallPwa: boolean;
 }
 
-/**
- * Detect current execution platform
- */
 export function getAppPlatform(): AppPlatform {
-  if (typeof window === "undefined") return "web";
-
-  // Check Tauri Windows Desktop
-  if (
-    "__TAURI__" in window ||
-    "__TAURI_METADATA__" in window ||
-    (window as any).__TAURI_INTERNALS__
-  ) {
-    return "windows";
-  }
-
-  // Check Capacitor Android
-  if (Capacitor.getPlatform() === "android") return "android";
-
-  // Installed PWAs remain web apps; only native Capacitor/Tauri shells receive
-  // platform-specific installer/update behavior.
-  return "web";
-}
-
-export function isWindowsApp(): boolean {
-  return getAppPlatform() === "windows";
+  return Capacitor.getPlatform() === "android" ? "android" : "web";
 }
 
 export function isAndroidApp(): boolean {
-  return getAppPlatform() === "android";
+  return Capacitor.getPlatform() === "android";
 }
 
 export function isPWA(): boolean {
@@ -60,7 +31,7 @@ export function isPWA(): boolean {
 export function isMobileDevice(): boolean {
   if (typeof window === "undefined") return false;
   return /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-    navigator.userAgent || ""
+    navigator.userAgent || "",
   );
 }
 
@@ -68,36 +39,42 @@ export function getPlatformInfo(): PlatformCapabilities {
   const platform = getAppPlatform();
   return {
     platform,
-    isTauri: platform === "windows",
-    isCapacitor: platform === "android",
+    isCapacitor: Capacitor.isNativePlatform(),
     isPWA: isPWA(),
     isMobileDevice: isMobileDevice(),
-    hasNativeCamera: Capacitor.isNativePlatform() || ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices),
+    hasNativeCamera:
+      Capacitor.isNativePlatform() ||
+      ("mediaDevices" in navigator && "getUserMedia" in navigator.mediaDevices),
     canInstallPwa: !isPWA() && platform === "web",
   };
 }
 
-/**
- * Pick image file from camera or photo gallery
- * Works uniformly across Web, Tauri, and Android Capacitor
- */
-export async function pickImageFile(source: "camera" | "gallery" = "gallery"): Promise<File | null> {
+/** Pick one camera image or multiple gallery images through the platform picker. */
+export async function pickImageFiles(
+  source: "camera" | "gallery" = "gallery",
+): Promise<File[]> {
   if (Capacitor.isNativePlatform()) {
     try {
-      const result = source === "camera"
-        ? await Camera.takePhoto({ quality: 90 })
-        : (await Camera.chooseFromGallery({ quality: 90 })).results[0];
-      if (!result?.webPath) return null;
+      const photos = source === "camera"
+        ? [await Camera.getPhoto({ quality: 90, resultType: CameraResultType.Uri })]
+        : (await Camera.pickImages({ quality: 90, limit: 0 })).photos;
 
-      const response = await fetch(result.webPath);
-      if (!response.ok) throw new Error("Không thể đọc ảnh đã chọn.");
-      const blob = await response.blob();
-      const mimeType = blob.type || "image/jpeg";
-      const extension = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-      return new File([blob], `posing-${Date.now()}.${extension}`, { type: mimeType });
+      return await Promise.all(
+        photos.map(async (photo, index) => {
+          if (!photo.webPath) throw new Error("Không thể đọc ảnh đã chọn.");
+          const response = await fetch(photo.webPath);
+          if (!response.ok) throw new Error("Không thể đọc ảnh đã chọn.");
+          const blob = await response.blob();
+          const mimeType = blob.type || "image/jpeg";
+          const extension = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+          return new File([blob], `posing-${Date.now()}-${index + 1}.${extension}`, {
+            type: mimeType,
+          });
+        }),
+      );
     } catch (error) {
       console.warn("Native image selection was cancelled or unavailable:", error);
-      return null;
+      return [];
     }
   }
 
@@ -105,53 +82,57 @@ export async function pickImageFile(source: "camera" | "gallery" = "gallery"): P
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
+    input.multiple = source !== "camera";
+    if (source === "camera" && isMobileDevice()) input.capture = "environment";
 
-    if (source === "camera" && isMobileDevice()) {
-      input.capture = "environment";
-    }
-
-    input.onchange = (e: any) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        resolve(file);
-      } else {
-        resolve(null);
-      }
+    const cleanup = () => input.remove();
+    input.onchange = () => {
+      resolve(Array.from(input.files || []));
+      cleanup();
     };
-    input.oncancel = () => resolve(null);
-
+    input.oncancel = () => {
+      resolve([]);
+      cleanup();
+    };
     input.click();
   });
 }
 
-/**
- * Save image file to local device (Download on Web/Tauri, or share/save on Mobile)
- */
-export async function saveImageToDevice(dataUrlOrBlob: string | Blob, fileName: string): Promise<boolean> {
+/** Save an image to the browser/device download location. */
+export async function saveImageToDevice(
+  dataUrlOrBlob: string | Blob,
+  fileName: string,
+): Promise<boolean> {
   try {
-    let url: string;
-    let revokeNeeded = false;
-
-    if (typeof dataUrlOrBlob === "string") {
-      url = dataUrlOrBlob;
-    } else {
-      url = URL.createObjectURL(dataUrlOrBlob);
-      revokeNeeded = true;
-    }
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    if (revokeNeeded) {
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
+    const objectUrl = typeof dataUrlOrBlob === "string"
+      ? dataUrlOrBlob
+      : URL.createObjectURL(dataUrlOrBlob);
+    const shouldRevoke = typeof dataUrlOrBlob !== "string";
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    if (shouldRevoke) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     return true;
-  } catch (err) {
-    console.error("Failed to save image to device:", err);
+  } catch (error) {
+    console.error("Failed to save image to device:", error);
+    return false;
+  }
+}
+
+export async function shareImageToDevice(blob: Blob, fileName: string): Promise<boolean> {
+  try {
+    const file = new File([blob], fileName, { type: blob.type || "image/jpeg" });
+    if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      await navigator.share({ files: [file], title: fileName });
+      return true;
+    }
+    return saveImageToDevice(blob, fileName);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return false;
+    console.error("Failed to share image:", error);
     return false;
   }
 }

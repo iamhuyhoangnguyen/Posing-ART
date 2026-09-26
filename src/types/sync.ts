@@ -1,6 +1,6 @@
 /**
  * Cloud Synchronization & Data Models
- * Common schema across Web, Windows (.exe) and Android (.apk)
+ * Common schema across Web and Android (.apk)
  */
 
 export type CloudRecordType =

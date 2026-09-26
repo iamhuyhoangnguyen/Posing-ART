@@ -25,7 +25,6 @@ import { Header } from "./components/Header";
 import { PoseCard } from "./components/PoseCard";
 const PoseModal = lazy(() => import("./components/PoseModal").then((module) => ({ default: module.PoseModal })));
 const AIPoseAdvisorModal = lazy(() => import("./components/AIPoseAdvisorModal").then((module) => ({ default: module.AIPoseAdvisorModal })));
-const AIPoseGeneratorModal = lazy(() => import("./components/AIPoseGeneratorModal").then((module) => ({ default: module.AIPoseGeneratorModal })));
 const BackupModal = lazy(() => import("./components/BackupModal").then((module) => ({ default: module.BackupModal })));
 const AddCustomPoseModal = lazy(() => import("./components/AddCustomPoseModal").then((module) => ({ default: module.AddCustomPoseModal })));
 const EditCoverModal = lazy(() => import("./components/EditCoverModal").then((module) => ({ default: module.EditCoverModal })));
@@ -104,6 +103,7 @@ export default function App() {
   // Active category index within section
   const [activeKyyeuCatIdx, setActiveKyyeuCatIdx] = useState(0);
   const [activeCanhanCatIdx, setActiveCanhanCatIdx] = useState(0);
+  const [isCanhanDetailOpen, setIsCanhanDetailOpen] = useState(false);
 
   // Search query & filter status
   const [searchQuery, setSearchQuery] = useState("");
@@ -124,14 +124,6 @@ export default function App() {
     categoryName: string;
     poseKey?: string;
     initialPhotoUrl?: string;
-  } | null>(null);
-
-  const [activeGeneratorModal, setActiveGeneratorModal] = useState<{
-    initialPrompt?: string;
-    targetPoseKey?: string;
-    initialReferenceImage?: string;
-    initialPoseTitle?: string;
-    initialCategoryName?: string;
   } | null>(null);
 
   const [showBackupModal, setShowBackupModal] = useState(false);
@@ -447,6 +439,7 @@ export default function App() {
         showProgressAndFilters={currentSection !== "canhan" && currentSection !== "kyyeu"}
         onBackToHome={() => {
           setCurrentSection("home");
+          setIsCanhanDetailOpen(false);
           setSearchQuery("");
           setFilterStatus("all");
         }}
@@ -468,7 +461,6 @@ export default function App() {
         onFilterChange={setFilterStatus}
         onOpenBackup={() => setShowBackupModal(true)}
         onOpenAddCustom={() => setCustomModalConfig({ isOpen: true, mode: "pose" })}
-        onOpenAIGenerator={() => setActiveGeneratorModal({})}
         onOpenInstallGuide={() => setShowInstallModal(true)}
         onOpenSettings={() => setShowPersonalModal(true)}
         onOpenPersonal={() => setShowPersonalModal(true)}
@@ -587,6 +579,7 @@ export default function App() {
                 whileTap={{ scale: 0.99 }}
                 onClick={() => {
                   setCurrentSection("canhan");
+                  setIsCanhanDetailOpen(false);
                   window.scrollTo(0, 0);
                 }}
                 className="group relative h-60 sm:h-72 rounded-3xl overflow-hidden cursor-pointer shadow-md hover:shadow-2xl border border-zinc-200/80 dark:border-zinc-800 card-hover-glow"
@@ -762,21 +755,8 @@ export default function App() {
               viewport={{ once: true, amount: 0.15, margin: "0px 0px -30px 0px" }}
               custom={4}
               variants={homeCardVariants}
-              className="grid grid-cols-3 gap-2.5 pt-2"
+              className="grid grid-cols-2 gap-2.5 pt-2"
             >
-              <motion.button
-                whileHover={{ y: -3 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setActiveGeneratorModal({})}
-                className="p-3.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left hover:border-amber-400 transition-colors shadow-2xs cursor-pointer"
-              >
-                <div className="w-7 h-7 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-2">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div className="text-xs font-bold">AI Tạo Ảnh</div>
-                <p className="text-[10px] text-zinc-500">Mẫu dáng tức thì</p>
-              </motion.button>
-
               <motion.button
                 whileHover={{ y: -3 }}
                 whileTap={{ scale: 0.97 }}
@@ -821,7 +801,7 @@ export default function App() {
         {(currentSection === "kyyeu" || currentSection === "canhan") && (
           <div className="space-y-4 animate-fadeIn">
             {/* Current section and completion summary */}
-            <div className="flex justify-end">
+            {(currentSection === "kyyeu" || !isCanhanDetailOpen) && <div className="flex justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                   {currentSection === "kyyeu" ? "Phần 1 • Kỷ Yếu" : "Phần 2 • Concept Cá Nhân"}
@@ -832,10 +812,10 @@ export default function App() {
                     : `${stats.canhanCompleted}/${stats.canhanTotal} dáng`}
                 </span>
               </div>
-            </div>
+            </div>}
 
             {/* PHẦN 2 (CÁ NHÂN): CÁC MỤC CHỌN NHƯ NÀNG THƠ, CẢM XÚC, ... THEO DẠNG NGANG DỄ BẤM */}
-            {currentSection === "canhan" ? (
+            {currentSection === "canhan" && !isCanhanDetailOpen ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
@@ -866,6 +846,8 @@ export default function App() {
                         type="button"
                         onClick={() => {
                           setActiveCanhanCatIdx(idx);
+                          setIsCanhanDetailOpen(true);
+                          setSearchQuery("");
                           setFilterStatus("all");
                         }}
                         className={`group relative flex-shrink-0 w-44 sm:w-52 h-26 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer ${
@@ -934,7 +916,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : currentSection === "kyyeu" ? (
               /* PHẦN 1 (KỶ YẾU): CATEGORY TABS */
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-none sticky top-[95px] z-20 bg-[#fcfbfa]/95 dark:bg-[#09090b]/95 backdrop-blur-md py-1">
                 {kyyeuData.map((cat, idx) => {
@@ -971,11 +953,29 @@ export default function App() {
                   );
                 })}
               </div>
+            ) : null}
+
+            {currentSection === "canhan" && isCanhanDetailOpen && currentCategory && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCanhanDetailOpen(false);
+                    setSearchQuery("");
+                  }}
+                  className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200"
+                >
+                  ← Chủ đề
+                </button>
+                <h2 className="min-w-0 truncate text-base font-black text-zinc-900 dark:text-zinc-100">
+                  {currentCategory.label}
+                </h2>
+              </div>
             )}
 
             {/* RỒI MỚI SANG MỤC ẢNH */}
             {/* Real-time search box */}
-            <div className="relative">
+            {(currentSection === "kyyeu" || !isCanhanDetailOpen) && <div className="relative">
               <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
               <input
                 type="text"
@@ -994,7 +994,7 @@ export default function App() {
                   Xóa
                 </button>
               )}
-            </div>
+            </div>}
 
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
             {currentSection === "kyyeu" && currentCategory && !searchQuery && (
@@ -1044,7 +1044,7 @@ export default function App() {
             )}
 
             {/* Pinterest & Rednote Exploration Bar for Current Category */}
-            {currentCategory && (
+            {currentCategory && (currentSection === "kyyeu" || isCanhanDetailOpen) && (
               <InspirationBar
                 categoryId={currentCategory.id}
                 categoryLabel={currentCategory.label}
@@ -1052,7 +1052,7 @@ export default function App() {
             )}
 
             {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
-            {displayedPoses.length > 0 ? (
+            {(currentSection === "kyyeu" || isCanhanDetailOpen) && displayedPoses.length > 0 ? (
               <div className="grid grid-cols-2 gap-3 pt-1">
                 {displayedPoses.map((pose, pIdx) => {
                   const poseKey = pose.id || `${currentSection}-${currentCatIdx}-${pIdx}`;
@@ -1092,20 +1092,16 @@ export default function App() {
                 })}
 
                 {/* Add Idea Card at the end of the category grid */}
-                <AddIdeaCard
+                {currentSection === "kyyeu" && <AddIdeaCard
                   title="Thêm ý tưởng"
                   subtitle="Bấm dấu + để thêm tư thế mới vào mục này"
                   badgeText="+ Thêm dáng"
                   onClick={() => {
-                    setCustomModalConfig({
-                      isOpen: true,
-                      categoryId: currentCategory?.id,
-                      mode: "pose",
-                    });
+                    setCustomModalConfig({ isOpen: true, categoryId: currentCategory?.id, mode: "pose" });
                   }}
-                />
+                />}
               </div>
-            ) : (
+            ) : (currentSection === "kyyeu" || isCanhanDetailOpen) ? (
               <div className="space-y-3">
                 <div className="text-center py-14 px-4 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 space-y-2">
                   <Search className="w-8 h-8 text-zinc-400 mx-auto" />
@@ -1126,7 +1122,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                {currentSection === "kyyeu" && <div className="grid grid-cols-2 gap-3">
                   <AddIdeaCard
                     title="Thêm ý tưởng"
                     subtitle="Bấm dấu + để thêm tư thế mới vào mục này"
@@ -1139,8 +1135,30 @@ export default function App() {
                       });
                     }}
                   />
-                </div>
+                </div>}
               </div>
+            ) : null}
+
+            {currentSection === "canhan" && isCanhanDetailOpen && currentCategory && (
+              <section className="rounded-2xl border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 dark:bg-violet-950/30 p-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-black text-violet-900 dark:text-violet-200 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-violet-500" /> Trợ lý AI cho {currentCategory.label}
+                  </h3>
+                  <p className="mt-1 text-xs text-violet-800/80 dark:text-violet-300/80">
+                    Nhận gợi ý góc chụp, cách tạo dáng và đạo cụ phù hợp với chủ đề.
+                  </p>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdvisorModal({ pose: null, categoryName: currentCategory.label })}
+                    className="w-full rounded-xl bg-violet-600 px-3 py-2.5 text-xs font-bold text-white flex items-center justify-center gap-1.5"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" /> Hỏi trợ lý AI
+                  </button>
+                </div>
+              </section>
             )}
           </div>
         )}
@@ -1163,10 +1181,6 @@ export default function App() {
           pose={activePoseModal.pose}
           categoryName={activePoseModal.categoryName}
           poseKey={activePoseModal.poseKey}
-          isDone={localStorage.getItem(`done-${activePoseModal.poseKey}`) === "true"}
-          onToggleDone={() => {
-            handleToggleDone(activePoseModal.poseKey);
-          }}
           onClose={() => setActivePoseModal(null)}
           onOpenAdvisor={(pose, cat, initialPhoto) =>
             setActiveAdvisorModal({
@@ -1176,25 +1190,7 @@ export default function App() {
               initialPhotoUrl: initialPhoto,
             })
           }
-          onOpenGenerator={(prompt, key, refImage, catName, pTitle) =>
-            setActiveGeneratorModal({
-              initialPrompt: prompt,
-              targetPoseKey: key,
-              initialReferenceImage: refImage,
-              initialCategoryName: catName,
-              initialPoseTitle: pTitle,
-            })
-          }
           onPhotosUpdated={refreshPhotoCounts}
-          onEditCover={() => {
-            setActiveEditCover({
-              type: "pose",
-              poseKey: activePoseModal.poseKey,
-              title: `Ảnh Đại Diện: ${activePoseModal.pose.title}`,
-              subtitle: activePoseModal.categoryName,
-              currentImage: activePoseModal.pose.coverImage,
-            });
-          }}
           onSetAsCover={(photoUrl) => {
             handleSaveCoverImage(photoUrl);
           }}
@@ -1223,34 +1219,6 @@ export default function App() {
           initialPhotoUrl={activeAdvisorModal.initialPhotoUrl}
           onClose={() => setActiveAdvisorModal(null)}
           onPhotoSavedToPose={refreshPhotoCounts}
-        />
-      )}
-
-      {/* MODAL 4: AI POSE GENERATOR & REFERENCE SYSTEM */}
-      {activeGeneratorModal && (
-        <AIPoseGeneratorModal
-          initialPrompt={activeGeneratorModal.initialPrompt}
-          targetPoseKey={activeGeneratorModal.targetPoseKey}
-          initialReferenceImage={activeGeneratorModal.initialReferenceImage}
-          initialPoseTitle={activeGeneratorModal.initialPoseTitle}
-          initialCategoryName={activeGeneratorModal.initialCategoryName}
-          onClose={() => setActiveGeneratorModal(null)}
-          onPhotoSavedToPose={refreshPhotoCounts}
-          onOpenAdvisor={(pose, cat, initialPhoto) => {
-            const targetPose = pose || {
-              id: activeGeneratorModal.targetPoseKey || "var-pose",
-              title: activeGeneratorModal.initialPoseTitle || "Dáng Tham Khảo Biến Thể",
-              desc: "Dáng biến thể tạo bởi AI",
-              coverImage: initialPhoto || activeGeneratorModal.initialReferenceImage || "",
-            };
-            setActiveGeneratorModal(null);
-            setActiveAdvisorModal({
-              pose: targetPose,
-              categoryName: cat || activeGeneratorModal.initialCategoryName || "Tham Khảo",
-              poseKey: activeGeneratorModal.targetPoseKey || "custom-pose",
-              initialPhotoUrl: initialPhoto,
-            });
-          }}
         />
       )}
 

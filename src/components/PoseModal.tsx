@@ -1,15 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   X,
   CheckCircle2,
-  Camera,
   Plus,
   Trash2,
   Sparkles,
-  Lightbulb,
-  Compass,
   Maximize2,
-  Pencil,
   Star,
   ExternalLink,
   Copy,
@@ -17,10 +13,15 @@ import {
   ShieldAlert,
   Clipboard,
   Clock,
-  Shield,
+  MoreVertical,
+  Download,
+  Share2,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { PoseItem, PhotoRecord, UserAccount } from "../types";
-import { getPhotosForPose, addPhoto, deletePhoto } from "../utils/db";
+import { getPhotosForPose, addPhoto, addPhotos, deletePhoto } from "../utils/db";
+import { pickImageFiles, saveImageToDevice, shareImageToDevice } from "../services/platformService";
 import {
   getPinterestSearchUrl,
   getRednoteSearchUrl,
@@ -28,25 +29,14 @@ import {
 } from "../utils/inspirationLinks";
 import { isAdminAuthenticated } from "../utils/adminAuth";
 import { getCurrentUser, isCurrentUserAdmin } from "../utils/userAuth";
-import { AdminLoginModal } from "./AdminLoginModal";
 
 interface PoseModalProps {
   pose: PoseItem | null;
   categoryName: string;
   poseKey: string;
-  isDone: boolean;
-  onToggleDone: () => void;
   onClose: () => void;
   onOpenAdvisor: (pose: PoseItem, category: string, initialPhoto?: string) => void;
-  onOpenGenerator: (
-    initialPrompt: string,
-    targetPoseKey: string,
-    initialReferenceImage?: string,
-    categoryName?: string,
-    poseTitle?: string
-  ) => void;
   onPhotosUpdated: () => void;
-  onEditCover?: () => void;
   onSetAsCover?: (photoUrl: string) => void;
 }
 
@@ -54,13 +44,9 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   pose,
   categoryName,
   poseKey,
-  isDone,
-  onToggleDone,
   onClose,
   onOpenAdvisor,
-  onOpenGenerator,
   onPhotosUpdated,
-  onEditCover,
   onSetAsCover,
 }) => {
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
@@ -70,10 +56,15 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(getCurrentUser());
   const [pasteToast, setPasteToast] = useState<string | null>(null);
   const [permissionNotice, setPermissionNotice] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<number>>(() => new Set());
+  const [openPhotoMenuId, setOpenPhotoMenuId] = useState<number | null>(null);
+  const photosWithUrls = useMemo(
+    () => photos.map((photo) => ({ photo, url: URL.createObjectURL(photo.blob) })),
+    [photos],
+  );
 
-  // Admin authentication state for photo deletion
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [pendingDeletePhoto, setPendingDeletePhoto] = useState<PhotoRecord | null>(null);
+  useEffect(() => () => photosWithUrls.forEach(({ url }) => URL.revokeObjectURL(url)), [photosWithUrls]);
 
   useEffect(() => {
     setCurrentUser(getCurrentUser());
@@ -142,14 +133,73 @@ export const PoseModal: React.FC<PoseModalProps> = ({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    for (let i = 0; i < files.length; i++) {
-      await handleAddSinglePhoto(files[i]);
+  const handleUploadFiles = async (files: File[]) => {
+    if (!files.length) return;
+    const user = getCurrentUser();
+    const isAdmin = isCurrentUserAdmin();
+    try {
+      await addPhotos(poseKey, files, undefined, undefined, {
+        uploadedBy: user?.name || "Tài khoản con",
+        uploaderRole: isAdmin ? "admin" : "member",
+        status: isAdmin ? "approved" : "pending",
+      });
+      await loadPhotos();
+      onPhotosUpdated();
+      setPasteToast(isAdmin
+        ? `✓ Đã thêm ${files.length} ảnh vào chủ đề.`
+        : `✓ Đã thêm ${files.length} ảnh; ảnh đang chờ quản trị viên phê duyệt.`);
+      setTimeout(() => setPasteToast(null), 4000);
+    } catch (error) {
+      console.error("Bulk photo upload failed:", error);
+      setPasteToast("Không thể lưu ảnh. Hãy thử chọn ít ảnh hơn hoặc kiểm tra dung lượng thiết bị.");
+      setTimeout(() => setPasteToast(null), 5000);
     }
-    e.target.value = "";
+  };
+
+  const handleChoosePhotos = async () => {
+    try {
+      await handleUploadFiles(await pickImageFiles("gallery"));
+    } catch (error) {
+      console.error("Image picker failed:", error);
+      setPasteToast("Không thể mở thư viện ảnh trên thiết bị.");
+      setTimeout(() => setPasteToast(null), 4000);
+    }
+  };
+
+  const photoFileName = (photo: PhotoRecord) => {
+    const originalName = photo.blob instanceof File ? photo.blob.name : "";
+    const extension = originalName.match(/\.[a-z0-9]{2,5}$/i)?.[0] || ".jpg";
+    return `posing-${photo.id}${extension}`;
+  };
+
+  const downloadPhoto = async (photo: PhotoRecord) => {
+    const saved = await saveImageToDevice(photo.blob, photoFileName(photo));
+    setOpenPhotoMenuId(null);
+    if (!saved) setPasteToast("Không thể tải ảnh xuống thiết bị.");
+  };
+
+  const sharePhoto = async (photo: PhotoRecord) => {
+    await shareImageToDevice(photo.blob, photoFileName(photo));
+    setOpenPhotoMenuId(null);
+  };
+
+  const downloadSelectedPhotos = async () => {
+    const selected = photos.filter((photo) => selectedPhotoIds.has(photo.id));
+    if (!selected.length) return;
+    for (const photo of selected) {
+      await saveImageToDevice(photo.blob, photoFileName(photo));
+    }
+    setPasteToast(`Đã gửi ${selected.length} ảnh tới thư mục tải xuống.`);
+    setTimeout(() => setPasteToast(null), 3500);
+  };
+
+  const toggleSelectedPhoto = (photoId: number) => {
+    setSelectedPhotoIds((current) => {
+      const next = new Set(current);
+      if (next.has(photoId)) next.delete(photoId);
+      else next.add(photoId);
+      return next;
+    });
   };
 
   const handlePasteButtonClick = async () => {
@@ -209,142 +259,18 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       }}
     >
       <div className="bg-white dark:bg-zinc-900 w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 animate-slideUp">
-        {/* Header with Photo Cover & Edit Pencil Button */}
-        <div className="relative border-b border-zinc-100 dark:border-zinc-800">
-          {/* Cover Image Banner */}
-          <div className="relative h-44 sm:h-52 w-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-            {pose.coverImage ? (
-              <img
-                src={pose.coverImage}
-                alt={pose.title}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80";
-                }}
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-amber-500/20 via-zinc-800 to-black text-white p-4">
-                <Camera className="w-10 h-10 text-amber-400 mb-2 stroke-1" />
-                <span className="text-xs font-semibold text-zinc-300">
-                  Chưa có ảnh đại diện tùy chỉnh
-                </span>
-                <span className="text-[10px] text-zinc-400">
-                  Bấm biểu tượng bút chì để đặt ảnh từ máy
-                </span>
-              </div>
-            )}
-
-            {/* Gradient Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/30" />
-
-            {/* Close button */}
-            <button
-              onClick={onClose}
-              className="absolute top-3 right-3 p-2 rounded-full bg-black/40 hover:bg-black/70 text-white backdrop-blur-md transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            {/* PENCIL EDIT COVER BUTTON */}
-            {onEditCover && (
-              <button
-                onClick={onEditCover}
-                title="Đổi ảnh đại diện cho dáng này"
-                className="absolute top-3 left-3 px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg active:scale-95 transition-all"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-                <span>Đổi ảnh đại diện</span>
-              </button>
-            )}
-
-            {/* Title on Banner */}
-            <div className="absolute bottom-3 left-4 right-4 text-white">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                {categoryName}
-              </span>
-              <h2 className="text-lg sm:text-xl font-extrabold text-white leading-tight mt-0.5">
-                {pose.title}
-              </h2>
-            </div>
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <p className="truncate text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">{categoryName}</p>
+            <h2 className="truncate text-base font-extrabold text-zinc-900 dark:text-zinc-100">{pose.title}</h2>
           </div>
+          <button onClick={onClose} aria-label="Đóng" className="shrink-0 rounded-full p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Content Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
-          {/* Description & Angle */}
-          <div className="space-y-2">
-            <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed font-medium">
-              {pose.desc}
-            </p>
-
-            {pose.angle && (
-              <div className="inline-flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800/80 px-3 py-1.5 rounded-xl font-medium">
-                <Compass className="w-4 h-4 text-amber-500" />
-                <span>Gợi ý góc máy: <strong>{pose.angle}</strong></span>
-              </div>
-            )}
-          </div>
-
-          {/* Shooting Tips */}
-          {pose.tips && pose.tips.length > 0 && (
-            <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-2xl p-3.5">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300 mb-2">
-                <Lightbulb className="w-4 h-4 text-amber-500" />
-                Mẹo Tạo Dáng Tại Hiện Trường:
-              </div>
-              <ul className="text-xs text-amber-900/90 dark:text-amber-200/90 space-y-1.5 list-disc pl-4 leading-relaxed">
-                {pose.tips.map((tip, idx) => (
-                  <li key={idx}>{tip}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Action: Toggle Done */}
-          <button
-            onClick={onToggleDone}
-            className={`w-full py-3 px-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-sm ${
-              isDone
-                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
-                : "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 hover:bg-zinc-800"
-            }`}
-          >
-            <CheckCircle2 className={`w-5 h-5 ${isDone ? "text-emerald-600" : ""}`} />
-            {isDone ? "✓ Đã chụp xong (Bấm để hủy)" : "Đánh dấu đã chụp xong"}
-          </button>
-
-          {/* AI Assistance Buttons */}
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <button
-              onClick={() => {
-                onClose();
-                onOpenAdvisor(pose, categoryName);
-              }}
-              className="p-3 rounded-2xl border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-violet-100 active:scale-95 transition-all text-center"
-            >
-              <Sparkles className="w-4 h-4 text-violet-500" />
-              <span>AI Phân tích dáng</span>
-            </button>
-
-            <button
-              onClick={() => {
-                onClose();
-                onOpenGenerator(
-                  `${categoryName}: ${pose.title}. ${pose.desc}`,
-                  poseKey,
-                  pose.coverImage,
-                  categoryName,
-                  pose.title
-                );
-              }}
-              className="p-3 rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-100 active:scale-95 transition-all text-center"
-            >
-              <Camera className="w-4 h-4 text-amber-500" />
-              <span>AI Biến tấu dáng</span>
-            </button>
-          </div>
-
           {/* Pinterest & Rednote External Exploration Section */}
           <div className="bg-gradient-to-r from-red-50/70 via-rose-50/50 to-amber-50/60 dark:from-zinc-800/80 dark:to-zinc-800/50 border border-red-200/70 dark:border-zinc-700/60 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between">
@@ -417,13 +343,26 @@ export const PoseModal: React.FC<PoseModalProps> = ({
               </div>
             )}
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-1.5">
                 Ảnh Tham Khảo ({photos.length})
-                <span className="text-[10px] font-normal text-zinc-400">(Offline IndexedDB)</span>
               </span>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                {photos.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMode = !selectionMode;
+                      setSelectionMode(nextMode);
+                      setSelectedPhotoIds(new Set());
+                    }}
+                    className="text-xs font-bold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 flex items-center gap-1"
+                  >
+                    <CheckSquare className="w-3.5 h-3.5" />
+                    {selectionMode ? "Bỏ chọn" : "Chọn nhiều"}
+                  </button>
+                )}
                 {/* High-Quality Paste button */}
                 <button
                   type="button"
@@ -435,49 +374,68 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                   <span className="hidden sm:inline">Dán ảnh</span> (Ctrl+V)
                 </button>
 
-                <label className="cursor-pointer text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-200 dark:border-amber-900/50 flex items-center gap-1 active:scale-95 transition-all shadow-2xs">
+                <button
+                  type="button"
+                  onClick={handleChoosePhotos}
+                  className="cursor-pointer text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 px-3 py-1.5 rounded-xl border border-amber-200 dark:border-amber-900/50 flex items-center gap-1 active:scale-95 transition-all shadow-2xs"
+                >
                   <Plus className="w-3.5 h-3.5" />
                   Thêm ảnh
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                  />
-                </label>
+                </button>
               </div>
             </div>
+
+            {selectionMode && photos.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl bg-zinc-50 dark:bg-zinc-800/70 p-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPhotoIds(
+                    selectedPhotoIds.size === photos.length
+                      ? new Set()
+                      : new Set(photos.map((photo) => photo.id)),
+                  )}
+                  className="text-xs font-semibold text-zinc-700 dark:text-zinc-200 px-2 py-1"
+                >
+                  {selectedPhotoIds.size === photos.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
+                </button>
+                <span className="text-xs text-zinc-500">Đã chọn {selectedPhotoIds.size}</span>
+                <button
+                  type="button"
+                  onClick={downloadSelectedPhotos}
+                  disabled={!selectedPhotoIds.size}
+                  className="ml-auto text-xs font-bold text-white bg-amber-500 disabled:opacity-40 px-3 py-1.5 rounded-lg flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" /> Tải ảnh đã chọn
+                </button>
+              </div>
+            )}
 
             {/* Grid of photos */}
             <div className="grid grid-cols-3 gap-2.5">
               {/* Add card with Paste hint */}
-              <label className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-600 bg-zinc-50 dark:bg-zinc-900/50 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:text-amber-500 cursor-pointer transition-colors active:scale-95 text-center p-1">
+              <button
+                type="button"
+                onClick={handleChoosePhotos}
+                className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-600 bg-zinc-50 dark:bg-zinc-900/50 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:text-amber-500 cursor-pointer transition-colors active:scale-95 text-center p-1"
+              >
                 <Plus className="w-5 h-5" />
                 <span className="text-[10px] font-bold">Thêm ảnh</span>
-                <span className="text-[9px] text-zinc-400">hoặc Ctrl+V</span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                />
-              </label>
+                <span className="text-[9px] text-zinc-400">Chọn nhiều ảnh</span>
+              </button>
 
-              {photos.map((p) => {
-                const imgUrl = URL.createObjectURL(p.blob);
+              {photosWithUrls.map(({ photo: p, url: imgUrl }) => {
                 const isPending = p.status === "pending";
+                const isSelected = selectedPhotoIds.has(p.id);
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setLightboxPhoto(imgUrl)}
-                    className="group relative aspect-square rounded-2xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 cursor-pointer shadow-sm border border-zinc-200/50 dark:border-zinc-700/50"
+                    onClick={() => selectionMode ? toggleSelectedPhoto(p.id) : setLightboxPhoto(imgUrl)}
+                    className={`group relative aspect-square rounded-2xl bg-zinc-100 dark:bg-zinc-800 cursor-pointer shadow-sm border border-zinc-200/50 dark:border-zinc-700/50 ${openPhotoMenuId === p.id ? "z-30" : "z-0"}`}
                   >
                     <img
                       src={imgUrl}
                       alt="Tham khảo dáng"
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      className="h-full w-full rounded-2xl object-cover transition-transform group-hover:scale-105"
                     />
 
                     {/* Pending approval badge */}
@@ -488,8 +446,14 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                       </div>
                     )}
 
-                    {/* Action buttons on photo */}
-                    <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
+                    {selectionMode && (
+                      <div className="absolute top-1.5 left-1.5 rounded-md bg-black/60 p-1 text-white">
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-amber-300" /> : <Square className="w-4 h-4" />}
+                      </div>
+                    )}
+
+                    {/* Photo actions menu */}
+                    <div className="absolute top-1.5 right-1.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {/* Set as cover button */}
                       {onSetAsCover && (
                         <button
@@ -504,18 +468,28 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                         </button>
                       )}
 
-                      {/* Delete button (Requires Admin) */}
                       <button
-                        onClick={(e) => handleDeletePhotoClick(p, e)}
-                        title={
-                          isCurrentUserAdmin()
-                            ? "Xóa ảnh (Quyền Quản trị viên)"
-                            : "Tài khoản con không được xóa ảnh"
-                        }
-                        className="p-1 rounded-full bg-black/60 text-white hover:bg-rose-600 transition-colors"
+                        type="button"
+                        onClick={() => setOpenPhotoMenuId(openPhotoMenuId === p.id ? null : p.id)}
+                        aria-label="Tùy chọn ảnh"
+                        className="p-1 rounded-full bg-black/70 text-white hover:bg-black transition-colors"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <MoreVertical className="w-4 h-4" />
                       </button>
+
+                      {openPhotoMenuId === p.id && (
+                        <div className="absolute right-0 top-8 z-50 min-w-36 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1.5 shadow-xl">
+                          <button type="button" onClick={() => void downloadPhoto(p)} className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2">
+                            <Download className="w-3.5 h-3.5" /> Tải ảnh xuống
+                          </button>
+                          <button type="button" onClick={() => void sharePhoto(p)} className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2">
+                            <Share2 className="w-3.5 h-3.5" /> Chia sẻ ảnh
+                          </button>
+                          <button type="button" onClick={(e) => handleDeletePhotoClick(p, e)} title={isCurrentUserAdmin() ? "Xóa ảnh (Quản trị viên)" : "Tài khoản con không được xóa ảnh"} className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2">
+                            <Trash2 className="w-3.5 h-3.5" /> Xóa ảnh
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Quick view icon */}
@@ -533,24 +507,19 @@ export const PoseModal: React.FC<PoseModalProps> = ({
               </p>
             )}
           </div>
+
+          <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-3.5 dark:border-violet-900/60 dark:bg-violet-950/30">
+            <div className="mb-2 flex items-center gap-2 text-sm font-bold text-violet-800 dark:text-violet-200">
+              <Sparkles className="h-4 w-4" /> Trợ lý AI
+            </div>
+            <div>
+              <button type="button" onClick={() => { onClose(); onOpenAdvisor(pose, categoryName); }} className="rounded-xl bg-white px-2 py-2.5 text-xs font-semibold text-violet-700 shadow-sm dark:bg-zinc-900 dark:text-violet-300">
+                Phân tích dáng
+              </button>
+            </div>
+          </section>
         </div>
       </div>
-
-      {/* Admin Verification Modal for Photo Deletion */}
-      <AdminLoginModal
-        isOpen={showAdminModal}
-        onClose={() => {
-          setShowAdminModal(false);
-          setPendingDeletePhoto(null);
-        }}
-        onSuccess={() => {
-          if (pendingDeletePhoto) {
-            executeDeletePhoto(pendingDeletePhoto);
-            setPendingDeletePhoto(null);
-          }
-        }}
-        actionDescription="xóa ảnh tham khảo này khỏi Cloud Drive"
-      />
 
       {/* Lightbox Modal */}
       {lightboxPhoto && (

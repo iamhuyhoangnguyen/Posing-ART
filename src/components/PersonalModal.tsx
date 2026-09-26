@@ -15,7 +15,6 @@ import {
   Sparkles,
   Cloud,
   RefreshCw,
-  Monitor,
   Smartphone,
   HardDrive,
   Download,
@@ -28,7 +27,6 @@ import {
   Info,
   Clock,
   ExternalLink,
-  Laptop,
   ArrowRight,
 } from "lucide-react";
 import { UserAccount, AIAccountSettings, PhotoRecord } from "../types";
@@ -364,7 +362,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                 )}
               </div>
               <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400">
-                Tài khoản • Liên kết 3 AI • Đồng bộ Windows & Android • Ngoại tuyến
+                Tài khoản • Liên kết AI • Đồng bộ Web & Android • Ngoại tuyến
               </p>
             </div>
           </div>
@@ -416,8 +414,8 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                 : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
             }`}
           >
-            <Laptop className="w-3.5 h-3.5" />
-            <span>Windows ⇋ Android</span>
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Web ⇋ Android</span>
           </button>
 
           <button
@@ -1045,13 +1043,13 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
           )}
 
           {/* ================================================= */}
-          {/* TAB 3: ĐỒNG BỘ HAI PHIÊN BẢN WINDOWS & ANDROID */}
+              {/* TAB 3: ĐỒNG BỘ WEB & ANDROID */}
           {/* ================================================= */}
           {activeTab === "sync" && (
             <div className="space-y-5 animate-fadeIn">
               <div>
                 <h3 className="text-xs font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  Đồng Bộ Hai Phiên Bản Windows & Android
+                  Đồng Bộ Web & Android
                 </h3>
                 <p className="text-xs text-zinc-500">
                   Dữ liệu dáng chụp, ảnh mẫu và tài khoản đồng bộ xuyên suốt qua Cloud Drive
@@ -1075,7 +1073,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                     {cloudStatus.photosCount} ảnh chung • {cloudStatus.pendingPhotosCount || 0} ảnh chờ duyệt
                   </div>
                   <p className="text-[11px] text-zinc-500">
-                    Bất kỳ ảnh nào bạn dán hoặc tải lên trên Windows sẽ hiển thị ngay trên điện thoại Android
+                    Ảnh tải lên trên Web sẽ đồng bộ với ứng dụng Android khi bạn đăng nhập cùng tài khoản
                   </p>
                 </div>
 
@@ -1089,28 +1087,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                 </button>
               </div>
 
-              {/* 2 Platform Cards */}
-              <div className="grid sm:grid-cols-2 gap-3">
-                {/* Windows Card */}
-                <div className="p-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/30 space-y-2.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
-                      <Monitor className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
-                        Phiên Bản Windows PC
-                      </h4>
-                      <span className="text-[10px] text-zinc-400">Desktop / Laptop</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                    • Hỗ trợ dán ảnh phím tắt <span className="font-mono bg-zinc-200 dark:bg-zinc-700 px-1 py-0.5 rounded">Ctrl + V</span> chất lượng cao.
-                    <br />• Cài làm ứng dụng máy tính (Desktop App) qua biểu tượng cài đặt trên thanh địa chỉ trình duyệt.
-                  </p>
-                </div>
-
-                {/* Android Card */}
+              <div className="grid gap-3">
                 <div className="p-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-800/30 space-y-2.5">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">

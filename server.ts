@@ -6,7 +6,6 @@ import fs from "fs";
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { fileURLToPath } from "url";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
-import { buildPoseGeneratorPrompt, parsePoseGeneratorResponse, generateSmartFallbackPose } from "./src/services/poseGeneratorService";
 
 dotenv.config();
 
@@ -23,9 +22,6 @@ const nativeCorsOrigins = new Set([
   "capacitor://localhost",
   "http://localhost",
   "https://localhost",
-  "tauri://localhost",
-  "http://tauri.localhost",
-  "https://tauri.localhost",
 ]);
 
 app.use((req, res, next) => {
@@ -653,9 +649,8 @@ app.delete("/api/cloud/pose/:id", (req, res) => {
 // ==========================================
 // CENTRALIZED VERSION & MULTI-PLATFORM UPDATE
 // ==========================================
-const CURRENT_APP_VERSION = "1.1.0";
+const CURRENT_APP_VERSION = "2.2.0";
 const MINIMUM_SUPPORTED_VERSION = "1.0.0";
-const WINDOWS_DOWNLOAD_URL = (process.env.WINDOWS_DOWNLOAD_URL || "").trim();
 const ANDROID_DOWNLOAD_URL = (process.env.ANDROID_DOWNLOAD_URL || "").trim();
 
 app.get("/api/version", (req, res) => {
@@ -667,20 +662,14 @@ app.get("/api/version", (req, res) => {
   res.json({
     currentVersion: CURRENT_APP_VERSION,
     minimumVersion: MINIMUM_SUPPORTED_VERSION,
-    releaseDate: "2026-09-24",
+    releaseDate: "2026-09-26",
     releaseNotes: [
-      "Kiến trúc Đa Nền Tảng duy nhất: Web/PWA, Windows (.exe) và Android (.apk) đồng bộ hoàn toàn.",
+      "Phiên bản 2.2 tập trung Web/PWA và Android (.apk).",
       "Hệ thống Cơ sở Dữ liệu Đám Mây đồng nhất: Favorites, Saved Poses, Collections, Concepts và AI Ideas.",
       "Cơ chế giải quyết xung đột Last-Write-Wins bảo đảm toàn vẹn dữ liệu giữa nhiều thiết bị.",
       "Tối ưu hóa bộ nhớ đệm Cache ngoại tuyến khi mất kết nối mạng.",
-      "Hỗ trợ cập nhật phiên bản 1-chạm cho Windows và Android.",
+      "Hỗ trợ cập nhật bản Android và làm mới ứng dụng Web/PWA.",
     ],
-    windows: {
-      updateAvailable: platform === "windows" && isClientOutdated && Boolean(WINDOWS_DOWNLOAD_URL),
-      version: CURRENT_APP_VERSION,
-      downloadUrl: WINDOWS_DOWNLOAD_URL,
-      instructions: "Tải file POSING_ART_Setup.exe và chạy cài đặt để cập nhật phiên bản mới nhất.",
-    },
     android: {
       updateAvailable: platform === "android" && isClientOutdated && Boolean(ANDROID_DOWNLOAD_URL),
       version: CURRENT_APP_VERSION,
@@ -696,7 +685,7 @@ app.get("/api/version", (req, res) => {
 
 // ==========================================
 // USER CLOUD DATA SYNCHRONIZATION (PHẦN 4, 5, 6, 7)
-// Shared dataset across Web, Windows, Android
+// Shared dataset across Web and Android
 // ==========================================
 
 // 1. Get all cloud records for user (incremental with ?since=timestamp)
@@ -879,7 +868,7 @@ app.delete("/api/user/record/:id", (req, res) => {
   }
 });
 
-// 5. User dataset summary (counts for UI across Web, Windows, Android)
+// 5. User dataset summary (counts for Web and Android)
 app.get("/api/user/summary", (req, res) => {
   try {
     const user = requireUser(req, res);
@@ -928,6 +917,36 @@ const ai = new GoogleGenAI({
   },
 });
 
+function withAiTimeout<T>(request: Promise<T>, timeoutMs = 45_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error("AI request timed out."), { code: "AI_TIMEOUT" })), timeoutMs);
+  });
+  return Promise.race([request, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function getAiErrorMessage(error: any, fallback: string): string {
+  const status = Number(error?.status || error?.code);
+  const message = String(error?.message || "");
+  if (error?.code === "AI_TIMEOUT") return "AI phản hồi quá thời gian chờ. Vui lòng thử lại sau.";
+  if (status === 401 || status === 403 || /API_KEY_INVALID|API key (?:not valid|invalid)|invalid API key/i.test(message)) {
+    return "GEMINI_API_KEY không hợp lệ hoặc chưa được cấp quyền sử dụng model.";
+  }
+  if (status === 404 || /model.+(not found|does not exist)|not found.+model/i.test(message)) {
+    return `Model Gemini không khả dụng: ${message || "hãy kiểm tra tên model trong cấu hình máy chủ."}`;
+  }
+  if (status === 429) return "Gemini đang giới hạn lượt gọi hoặc đã hết quota. Vui lòng thử lại sau.";
+  if (status >= 500) return "Dịch vụ Gemini đang gặp sự cố tạm thời. Vui lòng thử lại sau.";
+  return message || fallback;
+}
+
+function isRetryableAiError(error: any): boolean {
+  const status = Number(error?.status || error?.code);
+  return error?.code === "AI_TIMEOUT" || status === 408 || status === 429 || status >= 500;
+}
+
 // 1. Analyze Pose using gemini-3.1-pro-preview
 app.post("/api/ai/creative-chat", async (req, res) => {
   try {
@@ -940,6 +959,12 @@ app.post("/api/ai/creative-chat", async (req, res) => {
 
     if (!message && !image) {
       return res.status(400).json({ error: "Vui lòng nhập câu hỏi hoặc gửi ảnh." });
+    }
+    if (message !== undefined && typeof message !== "string") {
+      return res.status(400).json({ error: "Nội dung câu hỏi không hợp lệ." });
+    }
+    if (image !== undefined && (typeof image !== "string" || !image.startsWith("data:image/"))) {
+      return res.status(400).json({ error: "Ảnh gửi lên không đúng định dạng." });
     }
 
     const modelName = model === "claude" ? "Claude 3.7" : model === "gemini" ? "Gemini 2.5" : "ChatGPT (GPT-4o)";
@@ -989,10 +1014,11 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
     const parts: any[] = [];
 
     if (image) {
-      const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+      const imageMimeType = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/i)?.[1] || mimeType;
+      const cleanBase64 = image.replace(/^data:[^;]+;base64,/, "");
       parts.push({
         inlineData: {
-          mimeType,
+          mimeType: imageMimeType,
           data: cleanBase64,
         },
       });
@@ -1006,20 +1032,24 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
     }
 
     let response: any = null;
+    let lastError: any = null;
     const chatModels = ["gemini-3.6-flash", "gemini-3.8-flash"];
     for (const m of chatModels) {
       try {
-        response = await ai.models.generateContent({
+        response = await withAiTimeout(ai.models.generateContent({
           model: m,
           contents: { parts },
-        });
+        }));
         if (response?.text) break;
       } catch (e: any) {
+        lastError = e;
         console.warn(`Chat model ${m} failed:`, e?.message);
+        if (!isRetryableAiError(e)) throw e;
       }
     }
 
     if (!response || !response.text) {
+      if (lastError) throw lastError;
       throw new Error("Không thể kết nối đến mô hình AI lúc này.");
     }
 
@@ -1031,8 +1061,8 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
     });
   } catch (error: any) {
     console.error("Creative chat error:", error);
-    res.status(500).json({
-      error: error.message || "Lỗi xử lý yêu cầu sáng tạo ý tưởng AI.",
+    res.status(error?.code === "AI_TIMEOUT" ? 504 : 502).json({
+      error: getAiErrorMessage(error, "Lỗi xử lý yêu cầu sáng tạo ý tưởng AI."),
     });
   }
 });
@@ -1049,7 +1079,7 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
       context,
     } = req.body;
 
-    if (!image) {
+    if (!image || typeof image !== "string" || !image.startsWith("data:image/")) {
       return res.status(400).json({ error: "Vui lòng cung cấp hình ảnh để phân tích." });
     }
 
@@ -1064,7 +1094,7 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
     if (dataUriMatch && dataUriMatch[1]) {
       actualMimeType = dataUriMatch[1];
     }
-    const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
+    const cleanBase64 = image.replace(/^data:[^;]+;base64,/, "");
 
     const promptText = buildPoseAdvisorPrompt({
       poseTitle,
@@ -1074,7 +1104,6 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
     });
 
     const modelsToTry = [
-      "gemini-3.6-flash",
       "gemini-3.6-flash",
       "gemini-3.1-pro-preview",
       "gemini-3.8-flash",
@@ -1089,7 +1118,7 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
           // Brief pause before retry/fallback to avoid demand spike
           await new Promise((r) => setTimeout(r, 1000));
         }
-        response = await ai.models.generateContent({
+        response = await withAiTimeout(ai.models.generateContent({
           model: modelCandidate,
           contents: {
             parts: [
@@ -1107,22 +1136,20 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
           config: {
             responseMimeType: "application/json",
           },
-        });
+        }));
         if (response && response.text) {
           break;
         }
       } catch (err: any) {
         lastError = err;
         console.warn(`[AI Pose Advisor] Attempt ${i + 1} (${modelCandidate}) failed:`, err?.status || err?.code, err?.message);
+        if (!isRetryableAiError(err)) break;
       }
     }
 
     if (!response || !response.text) {
-      const errorMsg =
-        lastError?.status === 503 || lastError?.message?.includes("503")
-          ? "Hệ thống AI đang có lượng truy cập cao tạm thời. Vui lòng bấm 'Phân tích lại' sau vài giây."
-          : lastError?.message || "Không thể phân tích ảnh lúc này. Vui lòng thử lại sau.";
-      return res.status(503).json({ error: errorMsg });
+      const errorMsg = getAiErrorMessage(lastError, "Không thể phân tích ảnh lúc này. Vui lòng thử lại sau.");
+      return res.status(lastError?.code === "AI_TIMEOUT" ? 504 : 502).json({ error: errorMsg });
     }
 
     const rawText = response.text || "";
@@ -1135,185 +1162,8 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Pose analysis error:", error);
-    res.status(500).json({
-      error: error.message || "Đã xảy ra lỗi khi phân tích ảnh tư thế.",
-    });
-  }
-});
-
-// 2. AI Pose Reference & Variation Engine (Gemini 3.6 Flash + Image Generation)
-app.post("/api/ai/generate-pose", async (req, res) => {
-  try {
-    const {
-      prompt,
-      referenceImage,
-      referencePoseTitle,
-      referenceCategory,
-      variationLevel = 1,
-      gender = "nu",
-      shotType = "full",
-      concept = "Kỷ yếu & Chân dung",
-      aspectRatio = "3:4",
-      mimeType,
-    } = req.body;
-
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({
-        error: "Chưa cấu hình API Key trên máy chủ.",
-      });
-    }
-
-    // Determine actual mimeType if base64 data URI
-    let actualMimeType = mimeType || "image/jpeg";
-    let cleanRefBase64 = "";
-    if (referenceImage) {
-      const dataUriMatch = referenceImage.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
-      if (dataUriMatch && dataUriMatch[1]) {
-        actualMimeType = dataUriMatch[1];
-      }
-      cleanRefBase64 = referenceImage.replace(/^data:image\/\w+;base64,/, "").replace(/^data:[^;]+;base64,/, "");
-    }
-
-    // Step 1: Build Master Pose Director Prompt
-    const generatorPrompt = buildPoseGeneratorPrompt({
-      referencePoseTitle,
-      referenceCategory,
-      hasReferenceImage: !!cleanRefBase64,
-      variationLevel: Number(variationLevel) as 1 | 2 | 3,
-      gender,
-      shotType,
-      concept,
-      customInstructions: prompt,
-    });
-
-    const parts: any[] = [];
-    if (cleanRefBase64) {
-      parts.push({
-        inlineData: {
-          mimeType: actualMimeType,
-          data: cleanRefBase64,
-        },
-      });
-    }
-    parts.push({
-      text: generatorPrompt,
-    });
-
-    // Step 2: Call Gemini to analyze reference & generate structured Pose Reference Blueprint
-    const modelsToTry = [
-      "gemini-3.6-flash",
-      "gemini-3.1-pro-preview",
-      "gemini-3.8-flash",
-    ];
-
-    let directorResponse: any = null;
-    let lastError: any = null;
-
-    for (let i = 0; i < modelsToTry.length; i++) {
-      const modelCandidate = modelsToTry[i];
-      try {
-        if (i > 0) {
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        directorResponse = await ai.models.generateContent({
-          model: modelCandidate,
-          contents: { parts },
-          config: {
-            responseMimeType: "application/json",
-          },
-        });
-        if (directorResponse && directorResponse.text) {
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI Pose Generator] Attempt with ${modelCandidate} failed:`, err?.status || err?.code, err?.message);
-      }
-    }
-
-    let poseData: any;
-    if (directorResponse && directorResponse.text) {
-      poseData = parsePoseGeneratorResponse(directorResponse.text);
-    } else {
-      console.warn("[AI Pose Generator] Live AI model busy; deploying intelligent geometric variation engine.");
-      poseData = generateSmartFallbackPose({
-        referencePoseTitle,
-        referenceCategory,
-        hasReferenceImage: !!cleanRefBase64,
-        variationLevel: Number(variationLevel) as 1 | 2 | 3,
-        gender,
-        shotType,
-        concept,
-        customInstructions: prompt,
-      });
-    }
-
-    // Step 3: Attempt to generate photorealistic reference image
-    let generatedImageUrl = "";
-    let captionText = "";
-
-    try {
-      const imagePromptToUse = poseData.imagePrompt ||
-        `Realistic professional photograph of a person posing: ${poseData.title}. Clean body lines, high learnability, neutral soft background, natural light, no text, no watermark.`;
-
-      const imageParts: any[] = [];
-      if (cleanRefBase64) {
-        imageParts.push({
-          inlineData: {
-            mimeType: actualMimeType,
-            data: cleanRefBase64,
-          },
-        });
-        imageParts.push({
-          text: `Modify the pose variation cleanly: ${imagePromptToUse}. High learnability, photorealistic, clear limbs, no text, no watermark.`,
-        });
-      } else {
-        imageParts.push({
-          text: imagePromptToUse,
-        });
-      }
-
-      const imgResponse = await ai.models.generateContent({
-        model: "gemini-3.1-flash-image",
-        contents: { parts: imageParts },
-        config: {
-          imageConfig: {
-            aspectRatio: (aspectRatio as any) || "3:4",
-          },
-        },
-      });
-
-      const candidateParts = imgResponse.candidates?.[0]?.content?.parts || [];
-      for (const part of candidateParts) {
-        if (part.inlineData?.data) {
-          const mime = part.inlineData.mimeType || "image/png";
-          generatedImageUrl = `data:${mime};base64,${part.inlineData.data}`;
-        } else if (part.text) {
-          captionText += part.text;
-        }
-      }
-    } catch (imgErr: any) {
-      // Image generation model quota (429) or model fallback
-      console.warn("[AI Pose Generator] Image model generation note:", imgErr?.message?.slice(0, 120));
-      captionText = "Dáng tham khảo đã được tính toán giải phẫu & hình học chuẩn xác.";
-    }
-
-    if (generatedImageUrl) {
-      poseData.imageUrl = generatedImageUrl;
-    } else if (referenceImage) {
-      poseData.imageUrl = referenceImage;
-    }
-
-    res.json({
-      success: true,
-      poseData,
-      imageUrl: generatedImageUrl || referenceImage || undefined,
-      caption: captionText || poseData.summary,
-    });
-  } catch (error: any) {
-    console.error("Pose generation master error:", error);
-    res.status(500).json({
-      error: error.message || "Đã xảy ra lỗi khi tạo biến thể dáng tham khảo.",
+    res.status(error?.code === "AI_TIMEOUT" ? 504 : 502).json({
+      error: getAiErrorMessage(error, "Đã xảy ra lỗi khi phân tích ảnh tư thế."),
     });
   }
 });

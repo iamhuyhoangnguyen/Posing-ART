@@ -98,6 +98,7 @@ export const AIPoseAdvisorModal: React.FC<AIPoseAdvisorModalProps> = ({
       const response = await fetch(serverUrl("/api/ai/analyze-pose"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           image: photoDataUrl,
           mimeType,
@@ -108,7 +109,7 @@ export const AIPoseAdvisorModal: React.FC<AIPoseAdvisorModalProps> = ({
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Không thể phân tích ảnh lúc này.");
       }
@@ -119,7 +120,9 @@ export const AIPoseAdvisorModal: React.FC<AIPoseAdvisorModalProps> = ({
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Đã xảy ra lỗi khi gọi AI phân tích tư thế.");
+      setError(err.name === "TimeoutError" || err.name === "AbortError"
+        ? "AI mất quá nhiều thời gian phản hồi. Vui lòng thử lại sau."
+        : err.message || "Đã xảy ra lỗi khi gọi AI phân tích tư thế.");
     } finally {
       setAnalyzing(false);
     }
@@ -208,11 +211,11 @@ export const AIPoseAdvisorModal: React.FC<AIPoseAdvisorModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
           {/* Photo upload / preview */}
           {photoDataUrl ? (
-            <div className="relative rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-950 max-h-56 flex items-center justify-center group shadow-sm">
+            <div className="relative aspect-[4/3] w-full rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-950 flex items-center justify-center group shadow-sm">
               <img
                 src={photoDataUrl}
                 alt="Ảnh vừa chụp"
-                className="max-h-56 w-auto object-contain mx-auto"
+                className="h-full w-full object-cover"
               />
 
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">

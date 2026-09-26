@@ -102,6 +102,7 @@ export async function loginWithCredentials(
         window.dispatchEvent(new Event("auth_state_changed"));
         return { success: true, user: data.user };
       }
+      return { success: false, error: data.error || "Máy chủ không trả về tài khoản hợp lệ." };
     } else {
       const err = await res.json();
       if (res.status === 401) {
@@ -156,6 +157,7 @@ export async function registerSubAccount(
         window.dispatchEvent(new Event("auth_state_changed"));
         return { success: true, user: data.user };
       }
+      return { success: false, error: data.error || "Máy chủ không trả về tài khoản hợp lệ." };
     } else {
       const err = await res.json();
       return { success: false, error: err.error || "Không thể đăng ký tài khoản lúc này" };

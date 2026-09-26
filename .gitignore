@@ -6,7 +6,6 @@ coverage/
 .DS_Store
 *.log
 data/cloud_drive_store.json
-src-tauri/target/
 android/.gradle/
 android/local.properties
 android/app/build/

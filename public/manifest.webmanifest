@@ -1,7 +1,7 @@
 {
   "name": "POSING ART — Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh",
   "short_name": "POSING ART",
-  "description": "Sổ tay tra cứu tư thế chụp ảnh kỷ yếu và concept cá nhân, quản lý tiến độ buổi chụp, đồng bộ đám mây đa nền tảng Web, Windows, Android.",
+  "description": "Sổ tay tra cứu tư thế chụp ảnh kỷ yếu và concept cá nhân, quản lý tiến độ buổi chụp, đồng bộ đám mây trên Web và Android.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#09090b",

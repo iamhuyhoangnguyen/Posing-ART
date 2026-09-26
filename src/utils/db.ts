@@ -50,30 +50,53 @@ export async function addPhoto(
     status?: "approved" | "pending";
   }
 ): Promise<number> {
+  const [id] = await addPhotos(poseKey, [blob], note, cloudId, extra);
+  return id;
+}
+
+export async function addPhotos(
+  poseKey: string,
+  blobs: Array<Blob | File>,
+  note?: string,
+  cloudId?: string,
+  extra?: {
+    uploadedBy?: string;
+    uploaderRole?: "admin" | "member";
+    status?: "approved" | "pending";
+  },
+): Promise<number[]> {
+  if (!blobs.length) return [];
   const db = await openDatabase();
   const uploaderRole = extra?.uploaderRole || getCurrentUser()?.role || "member";
   const currentUser = getCurrentUser();
-  const item: Omit<PhotoRecord, "id"> = {
+  const createdAt = Date.now();
+  const items: Array<Omit<PhotoRecord, "id">> = blobs.map((blob, index) => ({
     poseKey,
     syncId: typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
-      : `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      : `photo-${createdAt}-${index}-${Math.random().toString(36).slice(2)}`,
     blob,
     note: note || "",
     cloudId,
     ownerUserId: currentUser?.id,
-    createdAt: Date.now(),
+    createdAt: createdAt + index,
     uploadedBy: extra?.uploadedBy,
     uploaderRole,
     status: extra?.status || (uploaderRole === "member" ? "pending" : "approved"),
-  };
+  }));
 
-  const id = await new Promise<number>((resolve, reject) => {
+  const ids = await new Promise<number[]>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
-    const req = store.add(item);
-    req.onsuccess = () => resolve(req.result as number);
-    req.onerror = () => reject(req.error);
+    const addedIds = new Array<number>(items.length);
+    items.forEach((item, index) => {
+      const req = store.add(item);
+      req.onsuccess = () => { addedIds[index] = req.result as number; };
+      req.onerror = () => reject(req.error);
+    });
+    tx.oncomplete = () => resolve(addedIds);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Không thể lưu ảnh vào thiết bị."));
   });
 
   // Background sync retries this IndexedDB record later if the server is offline.
@@ -83,7 +106,7 @@ export async function addPhoto(
       .catch((err) => console.warn("Photo sync deferred:", err));
   }
 
-  return id;
+  return ids;
 }
 
 export async function updatePhotoCloudState(

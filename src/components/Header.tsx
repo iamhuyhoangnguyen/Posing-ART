@@ -5,7 +5,6 @@ import {
   Moon,
   Sun,
   RotateCcw,
-  Sparkles,
   FolderArchive,
   Plus,
   Wifi,
@@ -28,7 +27,6 @@ interface HeaderProps {
   onFilterChange?: (status: FilterStatus) => void;
   onOpenBackup: () => void;
   onOpenAddCustom: () => void;
-  onOpenAIGenerator: () => void;
   onOpenInstallGuide?: () => void;
   onOpenUpdate?: () => void;
   onOpenSettings?: () => void;
@@ -50,7 +48,6 @@ export const Header: React.FC<HeaderProps> = ({
   onFilterChange,
   onOpenBackup,
   onOpenAddCustom,
-  onOpenAIGenerator,
   onOpenInstallGuide,
   onOpenUpdate,
   onOpenSettings,
@@ -142,15 +139,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action icons */}
         <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5">
-          <button
-            onClick={onOpenAIGenerator}
-            title="AI Studio Tạo Dáng Mẫu"
-            className="p-1.5 sm:p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/60 hover:bg-amber-100 dark:hover:bg-amber-900/80 transition-all flex items-center gap-1 text-xs font-semibold"
-          >
-            <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
-            <span className="hidden sm:inline">AI Studio</span>
-          </button>
-
           {onOpenInstallGuide && (
             <button
               onClick={onOpenInstallGuide}

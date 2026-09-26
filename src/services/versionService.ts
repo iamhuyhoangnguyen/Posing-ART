@@ -38,7 +38,6 @@ export async function checkAppUpdate(): Promise<{
   currentVersion: string;
   latestVersion: string;
   downloadUrl?: string;
-  windowsDownloadUrl?: string;
   androidDownloadUrl?: string;
   releaseNotes?: string[];
   platform: string;
@@ -60,10 +59,7 @@ export async function checkAppUpdate(): Promise<{
   let downloadUrl = "";
   let fileSize = "";
 
-  if (platform === "windows") {
-    downloadUrl = serverVer.windows.downloadUrl ? serverUrl(serverVer.windows.downloadUrl) : "";
-    fileSize = serverVer.windows.fileSize || "";
-  } else if (platform === "android") {
+  if (platform === "android") {
     downloadUrl = serverVer.android.downloadUrl ? serverUrl(serverVer.android.downloadUrl) : "";
     fileSize = serverVer.android.fileSize || "";
   }
@@ -73,7 +69,6 @@ export async function checkAppUpdate(): Promise<{
     currentVersion: APP_VERSION,
     latestVersion: serverVer.currentVersion,
     downloadUrl,
-    windowsDownloadUrl: serverVer.windows.downloadUrl ? serverUrl(serverVer.windows.downloadUrl) : "",
     androidDownloadUrl: serverVer.android.downloadUrl ? serverUrl(serverVer.android.downloadUrl) : "",
     releaseNotes: serverVer.releaseNotes,
     platform,

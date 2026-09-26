@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Download,
   Smartphone,
-  Laptop,
   Globe,
   Sparkles,
   ExternalLink,
@@ -30,7 +29,6 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({ isOpen, onClose 
     currentVersion: string;
     latestVersion: string;
     downloadUrl?: string;
-    windowsDownloadUrl?: string;
     androidDownloadUrl?: string;
     releaseNotes?: string[];
     platform: string;
@@ -102,9 +100,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({ isOpen, onClose 
         {/* Current Platform Card */}
         <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            {platform === "windows" ? (
-              <Laptop className="w-5 h-5 text-blue-500" />
-            ) : platform === "android" ? (
+            {platform === "android" ? (
               <Smartphone className="w-5 h-5 text-emerald-500" />
             ) : (
               <Globe className="w-5 h-5 text-amber-500" />
@@ -113,9 +109,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({ isOpen, onClose 
               <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
                 Nền tảng hiện tại:{" "}
                 <span className="text-amber-600 dark:text-amber-400 uppercase">
-                  {platform === "windows"
-                    ? "Windows App (.exe)"
-                    : platform === "android"
+                  {platform === "android"
                     ? "Android App (.apk)"
                     : isPWA()
                     ? "Web PWA (Đã cài đặt)"
@@ -155,22 +149,6 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({ isOpen, onClose 
             </p>
 
             {/* Platform specific action */}
-            {platform === "windows" && (
-              <div className="space-y-2 pt-1">
-                <a
-                  href={updateInfo.downloadUrl}
-                  download="POSING_ART_Setup.exe"
-                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>TẢI CẬP NHẬT WINDOWS (.EXE) — {updateInfo.fileSize || "18 MB"}</span>
-                </a>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  Tải file cài đặt về máy tính Windows và mở file để hoàn tất nâng cấp.
-                </p>
-              </div>
-            )}
-
             {platform === "android" && (
               <div className="space-y-2 pt-1">
                 <a
@@ -233,30 +211,12 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({ isOpen, onClose 
           </ul>
         </div>
 
-        {/* Download POSING ART for other platforms */}
+        {/* Download POSING ART for Android */}
         <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-3">
           <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-            Tải POSING ART cho các thiết bị khác
+            Tải POSING ART cho Android
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Windows EXE */}
-            {updateInfo.windowsDownloadUrl ? <a
-              href={updateInfo.windowsDownloadUrl}
-              download="POSING_ART_Setup.exe"
-              className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500 bg-zinc-50 dark:bg-zinc-900/60 flex items-center gap-3 transition-all group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Laptop className="w-4 h-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                  Windows (.exe)
-                </div>
-                <div className="text-[10px] text-zinc-500">Tauri Installer • 18 MB</div>
-              </div>
-              <Download className="w-4 h-4 text-zinc-400 group-hover:text-blue-500" />
-            </a> : <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500">Windows (.exe) — chưa phát hành</div>}
-
+          <div className="grid grid-cols-1 gap-2.5">
             {/* Android APK */}
             {updateInfo.androidDownloadUrl ? <a
               href={updateInfo.androidDownloadUrl}

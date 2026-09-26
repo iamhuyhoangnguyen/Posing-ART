@@ -1,17 +1,13 @@
 {
   "name": "posing-art",
   "private": true,
-  "version": "1.1.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "tsx server.ts",
-    "tauri": "tauri",
     "cap": "cap",
-    "icons:generate": "tauri icon src-tauri/app-icon.svg --output src-tauri/icons",
-    "check:native": "node scripts/check-native-config.mjs",
-    "build:tauri": "npm run check:native && npm run icons:generate && tauri build",
     "android:init": "cap add android",
     "build:android": "node scripts/build-android.mjs",
     "cap:sync": "cap sync android",
@@ -36,7 +32,6 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
     "@capacitor/cli": "^8.5.2",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",

@@ -8,7 +8,6 @@ import {
   HelpCircle,
   ExternalLink,
   ArrowRight,
-  Laptop,
   Globe,
   ShieldCheck,
   HardDrive,
@@ -16,7 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { APP_VERSION } from "../version";
-import { getAppPlatform, isPWA } from "../services/platformService";
+import { isPWA } from "../services/platformService";
 import { fetchServerVersion } from "../services/versionService";
 
 interface InstallGuideModalProps {
@@ -36,19 +35,17 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
   onDownloadHtmlOffline,
   onOpenUpdateModal,
 }) => {
-  const [activePlatformTab, setActivePlatformTab] = useState<"android" | "windows" | "pwa">("android");
-  const [releaseUrls, setReleaseUrls] = useState({ android: "", windows: "" });
+  const [activePlatformTab, setActivePlatformTab] = useState<"android" | "pwa">("android");
+  const [androidDownloadUrl, setAndroidDownloadUrl] = useState("");
 
   useEffect(() => {
     if (!isOpen) return;
     fetchServerVersion().then((version) => {
-      if (version) setReleaseUrls({ android: version.android.downloadUrl || "", windows: version.windows.downloadUrl || "" });
+      if (version) setAndroidDownloadUrl(version.android.downloadUrl || "");
     });
   }, [isOpen]);
 
   if (!isOpen) return null;
-
-  const currentPlatform = getAppPlatform();
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
@@ -69,7 +66,7 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                1 Codebase duy nhất — Hoạt động trên Web, Windows và Android
+                Dùng trên Web và Android
               </p>
             </div>
           </div>
@@ -83,7 +80,7 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
         </div>
 
         {/* Platform Selector Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/80 rounded-2xl text-xs font-bold">
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/80 rounded-2xl text-xs font-bold">
           <button
             onClick={() => setActivePlatformTab("android")}
             className={`py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
@@ -94,18 +91,6 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
           >
             <Smartphone className="w-3.5 h-3.5" />
             <span>Android (.apk)</span>
-          </button>
-
-          <button
-            onClick={() => setActivePlatformTab("windows")}
-            className={`py-2 px-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
-              activePlatformTab === "windows"
-                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
-                : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
-            }`}
-          >
-            <Laptop className="w-3.5 h-3.5" />
-            <span>Windows (.exe)</span>
           </button>
 
           <button
@@ -136,11 +121,11 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
               </div>
               <h3 className="font-extrabold text-base">Tải File Cài Đặt POSING ART.apk</h3>
               <p className="text-xs text-emerald-50 leading-relaxed">
-                Ứng dụng cài trực tiếp trên mọi điện thoại Android (Samsung, Xiaomi, Oppo, Pixel...). Lưu ảnh ngoại tuyến, chụp ảnh trực tiếp và đồng bộ đám mây với máy tính.
+                Cài trực tiếp trên điện thoại Android, lưu ảnh ngoại tuyến và đồng bộ dữ liệu đám mây với bản Web.
               </p>
 
-              {releaseUrls.android ? <a
-                href={releaseUrls.android}
+              {androidDownloadUrl ? <a
+                href={androidDownloadUrl}
                 download="POSING_ART.apk"
                 className="w-full py-2.5 px-4 bg-white text-zinc-900 font-extrabold text-xs rounded-xl shadow hover:bg-emerald-50 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
@@ -187,63 +172,7 @@ export const InstallGuideModal: React.FC<InstallGuideModalProps> = ({
         )}
 
         {/* ======================================================== */}
-        {/* TAB 2: WINDOWS (.EXE) */}
-        {/* ======================================================== */}
-        {activePlatformTab === "windows" && (
-          <div className="space-y-4 animate-fadeIn">
-            {/* Direct EXE Download Banner */}
-            <div className="p-4 rounded-3xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider bg-black/25 px-2.5 py-0.5 rounded-full">
-                  Windows Desktop App
-                </span>
-              <span className="text-xs text-blue-100 font-bold">Windows Installer</span>
-              </div>
-              <h3 className="font-extrabold text-base">Tải File Cài Đặt POSING ART.exe</h3>
-              <p className="text-xs text-blue-50 leading-relaxed">
-                Đóng gói bằng Tauri siêu nhẹ, chạy trực tiếp trên Windows 10 & 11 mà không cần mở trình duyệt web. Hỗ trợ phím tắt Ctrl+V dán ảnh nhanh, xuất báo cáo và đồng bộ cùng tài khoản điện thoại.
-              </p>
-
-              {releaseUrls.windows ? <a
-                href={releaseUrls.windows}
-                download="POSING_ART_Setup.exe"
-                className="w-full py-2.5 px-4 bg-white text-zinc-900 font-extrabold text-xs rounded-xl shadow hover:bg-blue-50 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                <Download className="w-4 h-4 text-blue-600" />
-                <span>TẢI VỀ POSING ART.exe CHO WINDOWS</span>
-              </a> : <p className="text-xs font-bold text-white/90">Bản cài Windows chưa phát hành. Liên kết tải sẽ xuất hiện tại đây khi có bộ cài thật.</p>}
-            </div>
-
-            <div className="p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/50 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center">
-                  1
-                </span>
-                <h4 className="font-bold text-sm text-zinc-900 dark:text-zinc-100">
-                  Cài đặt trên máy tính Windows
-                </h4>
-              </div>
-
-              <ol className="space-y-2 text-xs text-zinc-700 dark:text-zinc-300">
-                <li className="flex items-start gap-2">
-                  <span className="font-bold text-blue-600 dark:text-blue-400">Bước 1:</span>
-                  <span>Tải file <strong>POSING_ART_Setup.exe</strong> về máy tính.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="font-bold text-blue-600 dark:text-blue-400">Bước 2:</span>
-                  <span>Nhấp đúp chuột để chạy trình cài đặt (Setup Wizard).</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="font-bold text-blue-600 dark:text-blue-400">Bước 3:</span>
-                  <span>Icon POSING ART sẽ tự động xuất hiện ngoài Desktop và menu Start.</span>
-                </li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {/* ======================================================== */}
-        {/* TAB 3: WEB / PWA */}
+        {/* TAB 2: WEB / PWA */}
         {/* ======================================================== */}
         {activePlatformTab === "pwa" && (
           <div className="space-y-4 animate-fadeIn">

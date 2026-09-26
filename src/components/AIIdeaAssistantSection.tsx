@@ -180,6 +180,7 @@ Hãy thử chọn một gợi ý bên dưới hoặc bấm micro để nói nhé
       const res = await fetch(serverUrl("/api/ai/creative-chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120_000),
         body: JSON.stringify({
           model: selectedModel,
           message: queryText,
@@ -188,7 +189,7 @@ Hãy thử chọn một gợi ý bên dưới hoặc bấm micro để nói nhé
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || "Không thể kết nối với mô hình AI");
       }
@@ -208,7 +209,8 @@ Hãy thử chọn một gợi ý bên dưới hoặc bấm micro để nói nhé
         id: `ai-${Date.now()}`,
         sender: "ai",
         model: selectedModel,
-        text: `### 💡 Gợi Ý Ý Tưởng Concept Cho: "${queryText || "Ảnh mẫu"}"\n\n` +
+        text: `⚠️ Chưa nhận được phản hồi từ máy chủ AI${error instanceof Error ? ` (${error.message})` : ""}. Đây là gợi ý dự phòng ngoại tuyến.\n\n` +
+          `### 💡 Gợi Ý Ý Tưởng Concept Cho: "${queryText || "Ảnh mẫu"}"\n\n` +
           `**1. Dáng 1 - Góc Nghiêng Tự Nhiên**: Đứng xoay vai 45 độ so với ống kính, tay lướt nhẹ qua tóc mai, cằm hơi hạ 1-2cm tạo nét thon gọn.\n` +
           `**2. Dáng 2 - Bắt Nhịp Tương Tác**: Tay cầm hoa hoặc đạo cụ che 1/3 khuôn mặt, ánh mắt nhìn thẳng ống kính đầy cảm xúc.\n` +
           `**3. Dáng 3 - Khoảnh Khắc Bước Đi**: Bước chậm rãi, váy bay bồng bềnh, chụp liên tục bắt biểu cảm cười tự nhiên.\n\n` +
