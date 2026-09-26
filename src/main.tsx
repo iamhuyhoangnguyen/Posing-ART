@@ -5,9 +5,11 @@ import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import './index.css';
 
 const savedTheme = localStorage.getItem('theme');
-const initialDarkMode = savedTheme
-  ? savedTheme === 'dark'
-  : window.matchMedia('(prefers-color-scheme: dark)').matches;
+const initialDarkMode = savedTheme === 'dark'
+  ? true
+  : savedTheme === 'light'
+    ? false
+    : window.matchMedia('(prefers-color-scheme: dark)').matches;
 document.documentElement.classList.toggle('dark', initialDarkMode);
 document.documentElement.style.colorScheme = initialDarkMode ? 'dark' : 'light';
 

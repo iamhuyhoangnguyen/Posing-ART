@@ -1092,7 +1092,7 @@ app.delete("/api/cloud/pose/:id", asyncRoute(async (req, res) => {
 // ==========================================
 // CENTRALIZED VERSION & MULTI-PLATFORM UPDATE
 // ==========================================
-const CURRENT_APP_VERSION = "2.2.0";
+const CURRENT_APP_VERSION = "2.3.0";
 const MINIMUM_SUPPORTED_VERSION = "1.0.0";
 const ANDROID_DOWNLOAD_URL = (process.env.ANDROID_DOWNLOAD_URL || "").trim();
 
@@ -1107,7 +1107,9 @@ app.get("/api/version", (req, res) => {
     minimumVersion: MINIMUM_SUPPORTED_VERSION,
     releaseDate: "2026-09-26",
     releaseNotes: [
-      "Phiên bản 2.2 tập trung Web/PWA và Android (.apk).",
+      "Phiên bản 2.3 cải thiện điều hướng danh mục, ảnh bìa và giao diện.",
+      "Hỗ trợ xem trước ảnh từ Pinterest/RedNote, dán ảnh clipboard và chọn giao diện Theo hệ thống.",
+      "Thêm chip tìm nhanh dáng đứng, dáng ngồi, concept vintage và thông báo cập nhật Web/PWA.",
       "Hệ thống Cơ sở Dữ liệu Đám Mây đồng nhất: Favorites, Saved Poses, Collections, Concepts và AI Ideas.",
       "Cơ chế giải quyết xung đột Last-Write-Wins bảo đảm toàn vẹn dữ liệu giữa nhiều thiết bị.",
       "Tối ưu hóa bộ nhớ đệm Cache ngoại tuyến khi mất kết nối mạng.",

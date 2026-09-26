@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.2.0";
-export const APP_BUILD_NUMBER = 220;
+export const APP_VERSION = "2.3.0";
+export const APP_BUILD_NUMBER = 230;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,10 +32,10 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
-  "Phiên bản 2.2: tập trung Web/PWA và Android (.apk).",
-  "Hệ thống Đồng Bộ Đám Mây 2 chiều (Cloud Database Sync) liên thông tài khoản, mục yêu thích, dáng đã lưu và ý tưởng.",
-  "Cơ chế giải quyết xung đột Last-Write-Wins dựa trên timestamp chuẩn xác.",
-  "Hỗ trợ Cache ngoại tuyến & Offline Queue tự động đẩy dữ liệu khi có mạng.",
-  "Picker Android hỗ trợ chọn nhiều ảnh; ảnh có menu tải xuống/chia sẻ và chọn hàng loạt.",
-  "Cập nhật luồng AI, giao diện concept và hỗ trợ tải bản Android.",
+  "Phiên bản 2.3: điều hướng danh mục, chỉnh ảnh bìa và trải nghiệm giao diện được cải thiện.",
+  "Danh mục Kỷ Yếu mở màn chi tiết riêng giống Concept, có nút quay lại danh sách.",
+  "Modal ảnh bìa hỗ trợ xem trước link Pinterest/RedNote và dán ảnh trực tiếp từ clipboard.",
+  "Chế độ sáng/tối có lựa chọn Theo hệ thống và hiệu ứng chuyển mượt.",
+  "Thêm chip tìm nhanh cho dáng đứng, dáng ngồi và concept vintage.",
+  "Cải thiện thông báo cập nhật Web/PWA và hiển thị phiên bản app trên header.",
 ];

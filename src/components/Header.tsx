@@ -33,7 +33,8 @@ interface HeaderProps {
   onOpenPersonal?: () => void;
   onResetSession: () => void;
   darkMode: boolean;
-  onToggleDarkMode: () => void;
+  themePreference: "system" | "light" | "dark";
+  onThemePreferenceChange: (preference: "system" | "light" | "dark") => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -54,7 +55,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPersonal,
   onResetSession,
   darkMode,
-  onToggleDarkMode,
+  themePreference,
+  onThemePreferenceChange,
 }) => {
   const percent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const [isOnline, setIsOnline] = useState(
@@ -129,11 +131,14 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
             </div>
-            {subtitle && (
-              <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                {subtitle}
-              </p>
-            )}
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <span className="text-[10px] font-bold tracking-wide text-amber-700 dark:text-amber-400">V{APP_VERSION}</span>
+              {subtitle && (
+                <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                  {subtitle}
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -166,16 +171,20 @@ export const Header: React.FC<HeaderProps> = ({
             <FolderArchive className="w-4 h-4" />
           </button>
 
-          <button
-            onClick={onToggleDarkMode}
-            title={darkMode ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}
-            aria-label={darkMode ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}
-            aria-pressed={darkMode}
-            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors inline-flex items-center gap-1.5"
-          >
+          <label className="p-1.5 sm:px-2 sm:py-1.5 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors inline-flex items-center gap-1.5">
             {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-            <span className="text-[10px] font-semibold">{darkMode ? "Sáng" : "Tối"}</span>
-          </button>
+            <span className="sr-only">Chọn giao diện</span>
+            <select
+              aria-label="Giao diện màu"
+              value={themePreference}
+              onChange={(event) => onThemePreferenceChange(event.target.value as "system" | "light" | "dark")}
+              className="max-w-[96px] bg-transparent text-[10px] font-semibold text-current outline-none sm:max-w-none"
+            >
+              <option value="system" className="bg-white text-zinc-900">Theo hệ thống</option>
+              <option value="light" className="bg-white text-zinc-900">Sáng</option>
+              <option value="dark" className="bg-white text-zinc-900">Tối</option>
+            </select>
+          </label>
 
           {handlePersonalClick && (
             <button

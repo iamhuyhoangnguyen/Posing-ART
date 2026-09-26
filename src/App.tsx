@@ -123,7 +123,7 @@ export default function App() {
   // Active category index within section
   const [activeKyyeuCatIdx, setActiveKyyeuCatIdx] = useState(0);
   const [activeCanhanCatIdx, setActiveCanhanCatIdx] = useState(0);
-  const [isCanhanDetailOpen, setIsCanhanDetailOpen] = useState(false);
+  const [isCategoryDetailOpen, setIsCategoryDetailOpen] = useState(false);
 
   // Search query & filter status
   const [searchQuery, setSearchQuery] = useState("");
@@ -191,43 +191,51 @@ export default function App() {
     currentImage?: string;
   } | null>(null);
 
-  // Dark mode
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
+  // Theme preference: explicit light/dark choice or a user-selected system mode.
+  const [themePreference, setThemePreference] = useState<"system" | "light" | "dark">(() => {
     const saved = localStorage.getItem("theme");
-    if (saved) return saved === "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
   });
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+  const darkMode = themePreference === "system" ? systemPrefersDark : themePreference === "dark";
+  const themeMountedRef = useRef(false);
 
   // Done tracker trigger for re-rendering
   const [doneVersion, setDoneVersion] = useState(0);
 
-  // Apply dark class
+  // Apply the selected theme and briefly animate color changes.
   useEffect(() => {
     const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
+    let transitionTimer: number | undefined;
+    if (themeMountedRef.current) {
+      root.classList.add("theme-transition");
+      transitionTimer = window.setTimeout(() => root.classList.remove("theme-transition"), 280);
     }
+    root.classList.toggle("dark", darkMode);
     root.style.colorScheme = darkMode ? "dark" : "light";
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", darkMode ? "#09090b" : "#faf9f6");
+    themeMountedRef.current = true;
+    return () => {
+      if (transitionTimer !== undefined) window.clearTimeout(transitionTimer);
+    };
   }, [darkMode]);
 
   useEffect(() => {
     const preference = window.matchMedia("(prefers-color-scheme: dark)");
-    const followSystemPreference = (event: MediaQueryListEvent) => {
-      if (localStorage.getItem("theme") === null) setDarkMode(event.matches);
-    };
+    const followSystemPreference = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
     preference.addEventListener("change", followSystemPreference);
     return () => preference.removeEventListener("change", followSystemPreference);
   }, []);
 
+  const handleThemePreferenceChange = (preference: "system" | "light" | "dark") => {
+    localStorage.setItem("theme", preference);
+    setThemePreference(preference);
+  };
+
   const handleToggleDarkMode = () => {
-    setDarkMode((current) => {
-      const next = !current;
-      localStorage.setItem("theme", next ? "dark" : "light");
-      return next;
-    });
+    handleThemePreferenceChange(darkMode ? "light" : "dark");
   };
 
   // Persist categories
@@ -401,13 +409,16 @@ export default function App() {
     // Search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.desc?.toLowerCase().includes(q) ||
-          p.angle?.toLowerCase().includes(q) ||
-          p.tips?.some((t) => t.toLowerCase().includes(q))
-      );
+      const categoryMatches = `${currentCategory.label} ${currentCategory.description || ""}`.toLowerCase().includes(q);
+      if (!categoryMatches) {
+        list = list.filter(
+          (p) =>
+            p.title.toLowerCase().includes(q) ||
+            p.desc?.toLowerCase().includes(q) ||
+            p.angle?.toLowerCase().includes(q) ||
+            p.tips?.some((t) => t.toLowerCase().includes(q))
+        );
+      }
     }
 
     // Status filter
@@ -553,7 +564,7 @@ export default function App() {
         setCurrentSection("home");
       }
     }
-    setIsCanhanDetailOpen(false);
+    setIsCategoryDetailOpen(false);
     setSearchQuery("");
     setFilterStatus("all");
   };
@@ -607,14 +618,15 @@ export default function App() {
         onOpenPersonal={() => setShowPersonalModal(true)}
         onResetSession={handleResetSession}
         darkMode={darkMode}
-        onToggleDarkMode={handleToggleDarkMode}
+        themePreference={themePreference}
+        onThemePreferenceChange={handleThemePreferenceChange}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-5 pb-24">
         {(currentSection === "kyyeu" || currentSection === "canhan") && (
           <div className="mb-4 space-y-3">
-            {(currentSection === "kyyeu" || isCanhanDetailOpen) && (
+            {isCategoryDetailOpen && (
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
                 <input
@@ -635,7 +647,32 @@ export default function App() {
                 )}
               </div>
             )}
-            {currentCategory && (currentSection === "kyyeu" || isCanhanDetailOpen) && (
+            {isCategoryDetailOpen && (
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none" aria-label="Gợi ý tìm kiếm nhanh">
+                {[
+                  { label: "Dáng đứng", query: "đứng" },
+                  { label: "Dáng ngồi", query: "ngồi" },
+                  { label: "Concept vintage", query: "vintage" },
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion.query}
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery(suggestion.query);
+                      setFilterStatus("all");
+                    }}
+                    className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                      searchQuery.toLowerCase() === suggestion.query
+                        ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                        : "border-zinc-200 bg-white text-zinc-600 hover:border-amber-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                    }`}
+                  >
+                    {suggestion.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {currentCategory && isCategoryDetailOpen && (
               <InspirationBar
                 categoryId={currentCategory.id}
                 categoryLabel={currentCategory.label}
@@ -688,6 +725,7 @@ export default function App() {
                 whileTap={{ scale: 0.99 }}
                 onClick={() => {
                   setCurrentSection("kyyeu");
+                  setIsCategoryDetailOpen(false);
                   window.scrollTo(0, 0);
                 }}
                 className="group relative h-60 sm:h-72 rounded-3xl overflow-hidden cursor-pointer shadow-md hover:shadow-2xl border border-zinc-200/80 dark:border-zinc-800 card-hover-glow"
@@ -752,7 +790,7 @@ export default function App() {
                 whileTap={{ scale: 0.99 }}
                 onClick={() => {
                   setCurrentSection("canhan");
-                  setIsCanhanDetailOpen(false);
+                  setIsCategoryDetailOpen(false);
                   window.scrollTo(0, 0);
                 }}
                 className="group relative h-60 sm:h-72 rounded-3xl overflow-hidden cursor-pointer shadow-md hover:shadow-2xl border border-zinc-200/80 dark:border-zinc-800 card-hover-glow"
@@ -974,7 +1012,7 @@ export default function App() {
         {(currentSection === "kyyeu" || currentSection === "canhan") && (
           <div className="space-y-4 animate-fadeIn">
             {/* Current section and completion summary */}
-            {(currentSection === "kyyeu" || !isCanhanDetailOpen) && <div className="flex justify-end">
+            {!isCategoryDetailOpen && <div className="flex justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
                   {currentSection === "kyyeu" ? "Phần 1 • Kỷ Yếu" : "Phần 2 • Concept Cá Nhân"}
@@ -988,7 +1026,7 @@ export default function App() {
             </div>}
 
             {/* PHẦN 2 (CÁ NHÂN): CÁC MỤC CHỌN NHƯ NÀNG THƠ, CẢM XÚC, ... THEO DẠNG NGANG DỄ BẤM */}
-            {currentSection === "canhan" && !isCanhanDetailOpen ? (
+            {currentSection === "canhan" && !isCategoryDetailOpen ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
@@ -1021,7 +1059,7 @@ export default function App() {
                         isActive={isActive}
                         onSelect={() => {
                           setActiveCanhanCatIdx(idx);
-                          setIsCanhanDetailOpen(true);
+                          setIsCategoryDetailOpen(true);
                           setSearchQuery("");
                           setFilterStatus("all");
                         }}
@@ -1042,7 +1080,7 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            ) : currentSection === "kyyeu" ? (
+            ) : currentSection === "kyyeu" && !isCategoryDetailOpen ? (
               /* PHẦN 1 (KỶ YẾU): CATEGORY CARDS, MATCHING PHẦN 2 */
               <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                 {kyyeuData.map((cat, idx) => {
@@ -1060,6 +1098,7 @@ export default function App() {
                       isActive={isActive}
                       onSelect={() => {
                         setActiveKyyeuCatIdx(idx);
+                        setIsCategoryDetailOpen(true);
                         setSearchQuery("");
                         setFilterStatus("all");
                       }}
@@ -1079,17 +1118,17 @@ export default function App() {
               </div>
             ) : null}
 
-            {currentSection === "canhan" && isCanhanDetailOpen && currentCategory && (
+            {(currentSection === "canhan" || currentSection === "kyyeu") && isCategoryDetailOpen && currentCategory && (
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => {
-                    setIsCanhanDetailOpen(false);
+                    setIsCategoryDetailOpen(false);
                     setSearchQuery("");
                   }}
                   className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200"
                 >
-                  ← Chủ đề
+                  ← {currentSection === "kyyeu" ? "Danh mục" : "Chủ đề"}
                 </button>
                 <h2 className="min-w-0 truncate text-base font-black text-zinc-900 dark:text-zinc-100">
                   {currentCategory.label}
@@ -1098,7 +1137,7 @@ export default function App() {
             )}
 
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
-            {currentSection === "kyyeu" && currentCategory && !searchQuery && (
+            {currentSection === "kyyeu" && isCategoryDetailOpen && currentCategory && !searchQuery && (
               <div className="relative rounded-3xl overflow-hidden h-36 sm:h-44 border border-zinc-200 dark:border-zinc-800 shadow-sm group">
                 <img
                   src={
@@ -1145,7 +1184,7 @@ export default function App() {
             )}
 
             {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
-            {(currentSection === "kyyeu" || isCanhanDetailOpen) && displayedPoses.length > 0 ? (
+            {isCategoryDetailOpen && displayedPoses.length > 0 ? (
               <div className="grid grid-cols-2 gap-3 pt-1">
                 {displayedPoses.map((pose, pIdx) => {
                   const poseKey = pose.id || `${currentSection}-${currentCatIdx}-${pIdx}`;
@@ -1194,7 +1233,7 @@ export default function App() {
                   }}
                 />}
               </div>
-            ) : (currentSection === "kyyeu" || isCanhanDetailOpen) ? (
+            ) : isCategoryDetailOpen ? (
               <div className="space-y-3">
                 <div className="text-center py-14 px-4 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 space-y-2">
                   <Search className="w-8 h-8 text-zinc-400 mx-auto" />
@@ -1232,7 +1271,7 @@ export default function App() {
               </div>
             ) : null}
 
-            {currentSection === "canhan" && isCanhanDetailOpen && currentCategory && (
+            {(currentSection === "canhan" || currentSection === "kyyeu") && isCategoryDetailOpen && currentCategory && (
               <section className="rounded-2xl border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 dark:bg-violet-950/30 p-4 space-y-3">
                 <div>
                   <h3 className="text-sm font-black text-violet-900 dark:text-violet-200 flex items-center gap-2">
