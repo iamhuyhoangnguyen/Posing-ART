@@ -57,6 +57,7 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           {/* Pinterest Button */}
           <InspirationSearchLink
+            provider="pinterest"
             href={pUrl}
             title={`Tìm ảnh "${categoryLabel}" trên Pinterest`}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold shadow-xs active:scale-95 transition-all"
@@ -70,6 +71,7 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
 
           {/* Rednote (Xiaohongshu) Button */}
           <InspirationSearchLink
+            provider="rednote"
             href={rUrl}
             title={`Tìm ảnh "${queries.rednoteQuery}" trên Rednote (Tiểu Hồng Thư)`}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FF2442] hover:bg-[#d91934] text-white text-xs font-bold shadow-xs active:scale-95 transition-all"
@@ -102,6 +104,7 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
           </span>
           {conceptMeta.recommendedTags.map((tag, idx) => (
             <InspirationSearchLink
+              provider="pinterest"
               key={idx}
               href={`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(tag + " nữ dáng chụp")}`}
               className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800/80 px-2.5 py-1 rounded-lg border border-zinc-200/60 dark:border-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-colors inline-flex items-center gap-1 active:scale-95"

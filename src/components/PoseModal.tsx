@@ -308,6 +308,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
 
             <div className="grid grid-cols-2 gap-2">
               <InspirationSearchLink
+                provider="pinterest"
                 href={getPinterestSearchUrl(categoryName, categoryName, pose.title)}
                 className="py-2 px-3 rounded-xl bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all text-center"
               >
@@ -319,6 +320,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
               </InspirationSearchLink>
 
               <InspirationSearchLink
+                provider="rednote"
                 href={getRednoteSearchUrl(categoryName, categoryName, pose.title)}
                 title={`Tìm kiếm tiếng Trung: ${getInspirationSearchQuery(categoryName, categoryName, pose.title).rednoteQuery}`}
                 className="py-2 px-3 rounded-xl bg-[#FF2442] hover:bg-[#d91934] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all text-center"

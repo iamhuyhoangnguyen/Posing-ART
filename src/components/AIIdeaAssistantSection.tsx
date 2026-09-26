@@ -475,6 +475,7 @@ Hãy thử chọn một gợi ý bên dưới hoặc bấm micro để nói nhé
 
                     {chineseKeyword && (
                       <InspirationSearchLink
+                        provider="rednote"
                         href={getRednoteChineseSearchUrl(chineseKeyword)}
                         title={`Tìm kiếm từ khóa "${chineseKeyword}" trên Rednote`}
                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-[#FF2442] hover:bg-[#d91934] px-2.5 py-1 rounded-lg shadow-2xs transition-colors"

@@ -381,6 +381,7 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   {/* Rednote Chinese inspiration for this location */}
                   <InspirationSearchLink
+                    provider="rednote"
                     href={getRednoteChineseSearchUrl(`${currentLoc.name} Chụp ảnh concept`)}
                     className="flex-1 sm:flex-initial text-xs font-bold px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-900 flex items-center justify-center gap-1.5 transition-colors"
                   >
@@ -720,6 +721,7 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
               {/* Action Trigger */}
               <div className="pt-2 flex items-center gap-2">
                 <InspirationSearchLink
+                  provider="rednote"
                   href={getRednoteChineseSearchUrl(`${selectedDetailIdea.title} 摄影`)}
                   className="py-3 px-4 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-rose-200 dark:border-rose-900 transition-colors"
                 >
