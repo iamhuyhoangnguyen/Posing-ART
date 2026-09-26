@@ -11,7 +11,8 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        // Keep the current page stable until the user chooses to reload into a new build.
+        registerType: 'prompt',
         includeAssets: ['icon.svg'],
         manifest: {
           name: 'POSING — Sổ Tay Tạo Dáng',

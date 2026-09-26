@@ -5,7 +5,6 @@ import {
   Camera,
   Search,
   Sparkles,
-  CheckCircle2,
   FolderArchive,
   Plus,
   BookOpen,
@@ -25,6 +24,7 @@ import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
 import { getPhotoCounts } from "./utils/db";
 import { Header } from "./components/Header";
 import { PoseCard } from "./components/PoseCard";
+import { CategoryImageCard } from "./components/CategoryImageCard";
 const PoseModal = lazy(() => import("./components/PoseModal").then((module) => ({ default: module.PoseModal })));
 const AIPoseAdvisorModal = lazy(() => import("./components/AIPoseAdvisorModal").then((module) => ({ default: module.AIPoseAdvisorModal })));
 const BackupModal = lazy(() => import("./components/BackupModal").then((module) => ({ default: module.BackupModal })));
@@ -1014,65 +1014,18 @@ export default function App() {
                     }).length;
 
                     return (
-                      <button
+                      <CategoryImageCard
                         key={cat.id || idx}
-                        type="button"
-                        onClick={() => {
+                        category={cat}
+                        completedCount={catCompleted}
+                        isActive={isActive}
+                        onSelect={() => {
                           setActiveCanhanCatIdx(idx);
                           setIsCanhanDetailOpen(true);
                           setSearchQuery("");
                           setFilterStatus("all");
                         }}
-                        className={`group relative w-full h-28 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer ${
-                          isActive
-                            ? "border-2 border-amber-500 ring-2 ring-amber-500/30 shadow-md scale-[1.02]"
-                            : "border-zinc-200 dark:border-zinc-800 opacity-80 hover:opacity-100 hover:shadow-xs"
-                        }`}
-                      >
-                        <img
-                          src={
-                            cat.coverImage ||
-                            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80"
-                          }
-                          alt={cat.label}
-                          className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
-                        <div
-                          className={`absolute inset-0 transition-colors ${
-                            isActive
-                              ? "bg-gradient-to-t from-black/95 via-black/45 to-amber-950/20"
-                              : "bg-gradient-to-t from-black/90 via-black/50 to-transparent"
-                          }`}
-                        />
-
-                        {/* Completed count badge */}
-                        <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[10px] font-bold text-white border border-white/15">
-                          {catCompleted}/{cat.poses.length} dáng
-                        </div>
-
-                        {/* Active checkmark */}
-                        {isActive && (
-                          <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </div>
-                        )}
-
-                        {/* Concept Name & Description */}
-                        <div className="absolute bottom-2 left-2.5 right-2 text-white">
-                          <div
-                            className={`text-xs sm:text-sm font-extrabold leading-tight ${
-                              isActive ? "text-amber-300" : "text-white"
-                            }`}
-                          >
-                            {cat.label}
-                          </div>
-                          {cat.description && (
-                            <div className="text-[10px] text-zinc-300 line-clamp-1 mt-0.5 opacity-90">
-                              {cat.description}
-                            </div>
-                          )}
-                        </div>
-                      </button>
+                      />
                     );
                   })}
 
@@ -1100,46 +1053,17 @@ export default function App() {
                   }).length;
 
                   return (
-                    <button
+                    <CategoryImageCard
                       key={cat.id || idx}
-                      type="button"
-                      onClick={() => {
+                      category={cat}
+                      completedCount={catCompleted}
+                      isActive={isActive}
+                      onSelect={() => {
                         setActiveKyyeuCatIdx(idx);
                         setSearchQuery("");
                         setFilterStatus("all");
                       }}
-                      className={`group relative w-full h-28 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer active:scale-[0.99] ${
-                        isActive
-                          ? "border-2 border-amber-500 ring-2 ring-amber-500/30 shadow-md scale-[1.01]"
-                          : "border-zinc-200 dark:border-zinc-800 opacity-90 hover:opacity-100 hover:shadow-xs"
-                      }`}
-                    >
-                      <img
-                        src={cat.coverImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80"}
-                        alt={cat.label}
-                        loading="lazy"
-                        className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                      <div className={`absolute inset-0 transition-colors ${isActive ? "bg-gradient-to-t from-black/95 via-black/45 to-amber-950/20" : "bg-gradient-to-t from-black/90 via-black/50 to-transparent"}`} />
-                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[10px] font-bold text-white border border-white/15">
-                        {catCompleted}/{cat.poses.length} dáng
-                      </div>
-                      {isActive && (
-                        <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </div>
-                      )}
-                      <div className="absolute bottom-2 left-2.5 right-2 text-white">
-                        <div className={`text-xs sm:text-sm font-extrabold leading-tight ${isActive ? "text-amber-300" : "text-white"}`}>
-                          {cat.label}
-                        </div>
-                        {cat.description && (
-                          <div className="text-[10px] text-zinc-300 line-clamp-1 mt-0.5 opacity-90">
-                            {cat.description}
-                          </div>
-                        )}
-                      </div>
-                    </button>
+                    />
                   );
                 })}
                 <button
