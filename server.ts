@@ -64,7 +64,7 @@ interface CloudPhotoItem {
   note?: string;
   uploadedBy?: string;
   uploaderRole?: "admin" | "member";
-  status?: "approved" | "pending";
+  status?: "approved";
   createdAt: number;
 }
 
@@ -437,7 +437,8 @@ function normalizeCloudStore(input: Partial<CloudDriveData> | null): CloudDriveD
   }
 
   data.photos.forEach((photo) => {
-    if (!photo.status) photo.status = "approved";
+    // Photo approval has been removed; normalize legacy pending records at startup.
+    photo.status = "approved";
   });
   return data;
 }
@@ -764,12 +765,10 @@ app.post("/api/auth/social", (req, res) => {
 
 // 1. Cloud Drive Status
 app.get("/api/cloud/status", (_req, res) => {
-  const pendingCount = cloudStore.photos.filter((p) => p.status === "pending").length;
   res.json({
     success: true,
     connected: true,
     photosCount: cloudStore.photos.length,
-    pendingPhotosCount: pendingCount,
     customPosesCount: cloudStore.customPoses.length,
     usersCount: cloudStore.users.length,
     updatedAt: cloudStore.updatedAt,
@@ -778,22 +777,19 @@ app.get("/api/cloud/status", (_req, res) => {
 
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
-  const approvedPhotos = cloudStore.photos
-    .filter((photo) => photo.status === "approved")
-    .map(({ id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status, createdAt }) => ({
-      id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status, createdAt,
-    }));
+  const photos = cloudStore.photos.map(({ id, poseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
+    id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status: "approved" as const, createdAt,
+  }));
   res.json({
     success: true,
-    photos: approvedPhotos,
+    photos,
     customPoses: cloudStore.customPoses,
     customCategories: cloudStore.customCategories,
     updatedAt: cloudStore.updatedAt,
   });
 });
 
-// 3. Upload Photo to Cloud Drive
-// Sub-accounts uploads are tagged as "pending" for admin approval
+// 3. Upload Photo to Cloud Drive; every authenticated account's photo is immediately shared.
 app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
@@ -814,10 +810,15 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
     const existingPhoto = typeof localPhotoId === "string"
       ? cloudStore.photos.find((photo) => photo.ownerUserId === user.id && photo.localPhotoId === localPhotoId)
       : undefined;
-    if (existingPhoto) return res.json({ success: true, photo: existingPhoto, duplicate: true });
+    if (existingPhoto) {
+      if (existingPhoto.status !== "approved") {
+        existingPhoto.status = "approved";
+        await saveStore();
+      }
+      return res.json({ success: true, photo: existingPhoto, duplicate: true });
+    }
 
     const role = user.role;
-    const initialStatus = role === "admin" ? "approved" : "pending";
 
     const newPhoto: CloudPhotoItem = {
       id: `cloud_photo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -828,7 +829,7 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
       note: note || "",
       uploadedBy: user.name || uploadedBy || "Thành viên",
       uploaderRole: role,
-      status: initialStatus,
+      status: "approved",
       createdAt: Date.now(),
     };
 
@@ -842,40 +843,6 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
     }
     res.status(500).json({ error: err.message || "Lỗi lưu ảnh lên Cloud Drive" });
   }
-}));
-
-// 3B. Get Pending Photos for Admin Approval
-app.get("/api/cloud/photos/pending", (req, res) => {
-  if (!requireAdmin(req, res)) return;
-  const pending = cloudStore.photos.filter((p) => p.status === "pending");
-  res.json({ success: true, pending });
-});
-
-// 3C. Approve Photo (ADMIN ONLY)
-app.post("/api/cloud/photo/:id/approve", asyncRoute(async (req, res) => {
-  if (!requireAdmin(req, res)) return;
-  const { id } = req.params;
-  const photo = cloudStore.photos.find((p) => p.id === id);
-  if (!photo) {
-    return res.status(404).json({ error: "Không tìm thấy ảnh" });
-  }
-  photo.status = "approved";
-  await saveStore();
-  res.json({ success: true, photo });
-}));
-
-// 3D. Approve All Pending Photos (ADMIN ONLY)
-app.post("/api/cloud/photos/approve-all", asyncRoute(async (req, res) => {
-  if (!requireAdmin(req, res)) return;
-  let approvedCount = 0;
-  cloudStore.photos.forEach((p) => {
-    if (p.status === "pending") {
-      p.status = "approved";
-      approvedCount++;
-    }
-  });
-  if (approvedCount > 0) await saveStore();
-  res.json({ success: true, approvedCount });
 }));
 
 // 4. Add Custom Pose to Cloud Drive (ALLOWED FOR EVERYONE)

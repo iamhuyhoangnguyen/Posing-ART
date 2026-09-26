@@ -12,7 +12,6 @@ import {
   Check,
   ShieldAlert,
   Clipboard,
-  Clock,
   MoreVertical,
   Download,
   Share2,
@@ -116,21 +115,14 @@ export const PoseModal: React.FC<PoseModalProps> = ({
     const isAdmin = isCurrentUserAdmin();
     const uploaderRole = isAdmin ? "admin" : "member";
     const uploadedBy = user ? user.name : "Tài khoản con";
-    const status = isAdmin ? "approved" : "pending";
-
     await addPhoto(poseKey, file, undefined, undefined, {
       uploadedBy,
       uploaderRole,
-      status,
     });
 
     await loadPhotos();
     onPhotosUpdated();
 
-    if (!isAdmin) {
-      setPasteToast("✓ Đã thêm ảnh! Đang chờ quản trị viên phê duyệt.");
-      setTimeout(() => setPasteToast(null), 4000);
-    }
   };
 
   const handleUploadFiles = async (files: File[]) => {
@@ -141,13 +133,10 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       await addPhotos(poseKey, files, undefined, undefined, {
         uploadedBy: user?.name || "Tài khoản con",
         uploaderRole: isAdmin ? "admin" : "member",
-        status: isAdmin ? "approved" : "pending",
       });
       await loadPhotos();
       onPhotosUpdated();
-      setPasteToast(isAdmin
-        ? `✓ Đã thêm ${files.length} ảnh vào chủ đề.`
-        : `✓ Đã thêm ${files.length} ảnh; ảnh đang chờ quản trị viên phê duyệt.`);
+      setPasteToast(`✓ Đã thêm ${files.length} ảnh vào chủ đề.`);
       setTimeout(() => setPasteToast(null), 4000);
     } catch (error) {
       console.error("Bulk photo upload failed:", error);
@@ -424,7 +413,6 @@ export const PoseModal: React.FC<PoseModalProps> = ({
               </button>
 
               {photosWithUrls.map(({ photo: p, url: imgUrl }) => {
-                const isPending = p.status === "pending";
                 const isSelected = selectedPhotoIds.has(p.id);
                 return (
                   <div
@@ -437,14 +425,6 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                       alt="Tham khảo dáng"
                       className="h-full w-full rounded-2xl object-cover transition-transform group-hover:scale-105"
                     />
-
-                    {/* Pending approval badge */}
-                    {isPending && (
-                      <div className="absolute bottom-1.5 left-1.5 bg-amber-500/90 backdrop-blur-xs text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-xs">
-                        <Clock className="w-2.5 h-2.5" />
-                        <span>Chờ duyệt</span>
-                      </div>
-                    )}
 
                     {selectionMode && (
                       <div className="absolute top-1.5 left-1.5 rounded-md bg-black/60 p-1 text-white">

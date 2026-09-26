@@ -2,7 +2,7 @@
 // Coordinates synchronization between local IndexedDB and server-backed Cloud Drive
 import { getAllPhotos, addPhoto, openDatabase, updatePhotoCloudState } from "./db";
 import { getAdminToken } from "./adminAuth";
-import { getCurrentUser } from "./userAuth";
+import { getCurrentUser, refreshCurrentUserSession } from "./userAuth";
 import { serverUrl } from "../services/apiUrl";
 
 export interface CloudPhotoItem {
@@ -13,7 +13,7 @@ export interface CloudPhotoItem {
   note?: string;
   uploadedBy?: string;
   uploaderRole?: "admin" | "member";
-  status?: "approved" | "pending";
+  status?: "approved";
   createdAt: number;
 }
 
@@ -39,7 +39,7 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 
 /**
  * Uploads a photo to Cloud Drive
- * Sub-accounts are marked as "pending" for admin approval
+ * Photos from every authenticated account are shared immediately.
  */
 export async function uploadPhotoToCloud(
   poseKey: string,
@@ -47,7 +47,6 @@ export async function uploadPhotoToCloud(
   note?: string,
   uploadedBy?: string,
   uploaderRole?: "admin" | "member",
-  status?: "approved" | "pending",
   localPhotoId?: string,
   expectedUserId?: string,
 ): Promise<{ success: boolean; cloudId?: string }> {
@@ -56,19 +55,26 @@ export async function uploadPhotoToCloud(
     if (!user?.token || (expectedUserId && user.id !== expectedUserId)) return { success: false };
     let dataUrl = typeof blobOrDataUrl === "string" ? blobOrDataUrl : await blobToDataUrl(blobOrDataUrl);
 
-    const res = await fetch(serverUrl("/api/cloud/upload-photo"), {
+    const upload = (token: string) => fetch(serverUrl("/api/cloud/upload-photo"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${user.token}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         poseKey,
         dataUrl,
         note: note || "",
         uploadedBy: uploadedBy || "Người dùng",
         uploaderRole: uploaderRole || "member",
-        status: status || (uploaderRole === "admin" ? "approved" : "pending"),
+        status: "approved",
         localPhotoId,
       }),
     });
+    let res = await upload(user.token);
+    if (res.status === 401) {
+      const refreshedUser = await refreshCurrentUserSession(user);
+      if (refreshedUser?.token && refreshedUser.id === user.id) {
+        res = await upload(refreshedUser.token);
+      }
+    }
 
     if (res.ok) {
       const json = await res.json();
@@ -106,7 +112,6 @@ export async function syncPendingLocalPhotos(): Promise<number> {
         photo.note,
         photo.uploadedBy,
         photo.uploaderRole,
-        photo.status,
         syncId,
         currentUser.id,
       );
@@ -121,26 +126,6 @@ export async function syncPendingLocalPhotos(): Promise<number> {
     }
   }
   return uploaded;
-}
-
-/**
- * Approve a pending photo on Cloud Drive (ADMIN ONLY)
- */
-export async function approvePhotoOnCloud(cloudId: string): Promise<boolean> {
-  try {
-    const token = getAdminToken();
-    const res = await fetch(serverUrl(`/api/cloud/photo/${encodeURIComponent(cloudId)}/approve`), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token || ""}`,
-      },
-    });
-    return res.ok;
-  } catch (err) {
-    console.error("Cloud photo approve error:", err);
-    return false;
-  }
 }
 
 /**

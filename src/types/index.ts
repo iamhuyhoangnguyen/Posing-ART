@@ -13,8 +13,6 @@ export interface UserAccount {
   token?: string;
 }
 
-export type PhotoApprovalStatus = "approved" | "pending";
-
 export interface PoseItem {
   id: string; // e.g. "kyyeu-0-0" or custom uuid
   title: string;
@@ -45,7 +43,6 @@ export interface PhotoRecord {
   note?: string;
   uploadedBy?: string;
   uploaderRole?: UserRole;
-  status?: PhotoApprovalStatus;
 }
 
 export interface AIAccountSettings {

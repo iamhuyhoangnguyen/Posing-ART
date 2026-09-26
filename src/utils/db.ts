@@ -47,7 +47,6 @@ export async function addPhoto(
   extra?: {
     uploadedBy?: string;
     uploaderRole?: "admin" | "member";
-    status?: "approved" | "pending";
   }
 ): Promise<number> {
   const [id] = await addPhotos(poseKey, [blob], note, cloudId, extra);
@@ -62,7 +61,6 @@ export async function addPhotos(
   extra?: {
     uploadedBy?: string;
     uploaderRole?: "admin" | "member";
-    status?: "approved" | "pending";
   },
 ): Promise<number[]> {
   if (!blobs.length) return [];
@@ -82,7 +80,7 @@ export async function addPhotos(
     createdAt: createdAt + index,
     uploadedBy: extra?.uploadedBy,
     uploaderRole,
-    status: extra?.status || (uploaderRole === "member" ? "pending" : "approved"),
+    status: "approved",
   }));
 
   const ids = await new Promise<number[]>((resolve, reject) => {
@@ -135,45 +133,6 @@ export async function updatePhotoCloudState(
     };
     getReq.onerror = () => reject(getReq.error);
   });
-}
-
-export async function updatePhotoStatus(
-  id: number,
-  status: "approved" | "pending"
-): Promise<void> {
-  const db = await openDatabase();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const getReq = store.get(id);
-
-    getReq.onsuccess = () => {
-      const data = getReq.result;
-      if (data) {
-        data.status = status;
-        const putReq = store.put(data);
-        putReq.onsuccess = () => resolve();
-        putReq.onerror = () => reject(putReq.error);
-      } else {
-        resolve();
-      }
-    };
-    getReq.onerror = () => reject(getReq.error);
-  });
-}
-
-export async function getPendingPhotos(): Promise<PhotoRecord[]> {
-  const photos = await getAllPhotos();
-  return photos.filter((p) => p.status === "pending");
-}
-
-export async function approveAllPendingPhotos(): Promise<number> {
-  const photos = await getAllPhotos();
-  const pending = photos.filter((p) => p.status === "pending");
-  for (const p of pending) {
-    await updatePhotoStatus(p.id, "approved");
-  }
-  return pending.length;
 }
 
 export async function getPhotosForPose(poseKey: string): Promise<PhotoRecord[]> {

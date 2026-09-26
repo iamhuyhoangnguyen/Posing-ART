@@ -19,13 +19,11 @@ import {
   HardDrive,
   Download,
   Trash2,
-  Check,
   Sun,
   Moon,
   FolderArchive,
   RotateCcw,
   Info,
-  Clock,
   ExternalLink,
   ArrowRight,
 } from "lucide-react";
@@ -45,9 +43,9 @@ import {
   saveAIAccountSettings,
   updateProviderSetting,
 } from "../utils/aiAccounts";
-import { performCloudSync, getCloudStatus, approvePhotoOnCloud, deletePhotoFromCloud } from "../utils/cloudSync";
+import { performCloudSync, getCloudStatus } from "../utils/cloudSync";
 import { APP_VERSION } from "../version";
-import { getPendingPhotos, updatePhotoStatus, deletePhoto, getAllPhotos } from "../utils/db";
+import { deletePhoto, getAllPhotos } from "../utils/db";
 
 interface PersonalModalProps {
   isOpen: boolean;
@@ -108,18 +106,12 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
   const [cloudStatus, setCloudStatus] = useState<{
     connected: boolean;
     photosCount: number;
-    pendingPhotosCount?: number;
   }>({
     connected: true,
     photosCount: 0,
-    pendingPhotosCount: 0,
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
-
-  // Pending photos approval (Admin only)
-  const [pendingPhotos, setPendingPhotos] = useState<PhotoRecord[]>([]);
-  const [isLoadingPending, setIsLoadingPending] = useState(false);
 
   // Preload photos for offline state
   const [isPreloading, setIsPreloading] = useState(false);
@@ -135,7 +127,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
       }
       refreshUserData();
       loadCloudInfo();
-      loadPendingPhotos();
 
       if ("storage" in navigator && "estimate" in navigator.storage) {
         navigator.storage
@@ -163,20 +154,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
     setCloudStatus(st);
   };
 
-  const loadPendingPhotos = async () => {
-    if (isCurrentUserAdmin()) {
-      setIsLoadingPending(true);
-      try {
-        const localPending = await getPendingPhotos();
-        setPendingPhotos(localPending);
-      } catch (e) {
-        console.error("Error loading pending photos", e);
-      } finally {
-        setIsLoadingPending(false);
-      }
-    }
-  };
-
   // Login handler
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,7 +168,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
         setCurrentUser(res.user);
         setUsernameInput("");
         setPasswordInput("");
-        loadPendingPhotos();
         setTimeout(() => setAuthSuccess(""), 3000);
       } else {
         setAuthError(res.error || "Tài khoản hoặc mật khẩu không chính xác");
@@ -249,54 +225,8 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
   const handleLogout = () => {
     logoutUser();
     setCurrentUser(null);
-    setPendingPhotos([]);
     setAuthSuccess("Đã đăng xuất tài khoản.");
     setTimeout(() => setAuthSuccess(""), 2500);
-  };
-
-  // Admin Approve Photo
-  const handleApprovePhoto = async (photo: PhotoRecord) => {
-    try {
-      await updatePhotoStatus(photo.id, "approved");
-      if (photo.cloudId) {
-        await approvePhotoOnCloud(photo.cloudId);
-      }
-      setPendingPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-      onSyncComplete?.();
-    } catch (e) {
-      console.error("Failed to approve photo", e);
-    }
-  };
-
-  // Admin Reject Photo
-  const handleRejectPhoto = async (photo: PhotoRecord) => {
-    if (!window.confirm("Bạn có chắc chắn muốn từ chối và xóa ảnh này?")) return;
-    try {
-      await deletePhoto(photo.id, photo.cloudId);
-      if (photo.cloudId) {
-        await deletePhotoFromCloud(photo.cloudId);
-      }
-      setPendingPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-      onSyncComplete?.();
-    } catch (e) {
-      console.error("Failed to reject photo", e);
-    }
-  };
-
-  // Admin Approve All
-  const handleApproveAll = async () => {
-    try {
-      for (const p of pendingPhotos) {
-        await updatePhotoStatus(p.id, "approved");
-        if (p.cloudId) {
-          await approvePhotoOnCloud(p.cloudId);
-        }
-      }
-      setPendingPhotos([]);
-      onSyncComplete?.();
-    } catch (e) {
-      console.error("Failed to approve all", e);
-    }
   };
 
   // Cloud Sync
@@ -309,7 +239,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
         ? `✓ Đã đồng bộ: gửi ${res.uploaded} ảnh, nhận ${res.downloaded} ảnh (tổng ${res.totalCloudPhotos} ảnh chung)`
         : "Chưa kết nối máy chủ. Ảnh vẫn nằm trên thiết bị và sẽ tự thử lại khi có mạng.");
       await loadCloudInfo();
-      await loadPendingPhotos();
       onSyncComplete?.();
     } catch {
       setSyncFeedback("Không thể kết nối Cloud Drive lúc này (Đang ngoại tuyến).");
@@ -387,11 +316,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
           >
             <User className="w-3.5 h-3.5" />
             <span>Tài Khoản</span>
-            {pendingPhotos.length > 0 && isCurrentUserAdmin() && (
-              <span className="ml-1 w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center font-bold">
-                {pendingPhotos.length}
-              </span>
-            )}
           </button>
 
           <button
@@ -534,110 +458,6 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                     />
                   </div>
 
-                  {/* PERMISSION WORKFLOW: ADMIN VS SUB-ACCOUNT */}
-                  {currentUser.role === "admin" ? (
-                    /* ADMIN VIEW: PENDING APPROVAL QUEUE */
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Crown className="w-4 h-4 text-amber-500" />
-                          <h4 className="text-xs font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                            Phê Duyệt Ảnh Từ Tài Khoản Con ({pendingPhotos.length})
-                          </h4>
-                        </div>
-                        {pendingPhotos.length > 0 && (
-                          <button
-                            onClick={handleApproveAll}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 transition-all"
-                          >
-                            <Check className="w-3 h-3" />
-                            Duyệt tất cả
-                          </button>
-                        )}
-                      </div>
-
-                      {pendingPhotos.length === 0 ? (
-                        <div className="p-4 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/30 text-center space-y-1">
-                          <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto" />
-                          <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                            Không có ảnh nào đang chờ duyệt
-                          </p>
-                          <p className="text-[11px] text-zinc-400">
-                            Khi các tài khoản con tải ảnh tham khảo lên, bạn sẽ nhận được thông báo kiểm duyệt tại đây trước khi công khai.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                          {pendingPhotos.map((photo) => {
-                            const imgUrl = URL.createObjectURL(photo.blob);
-                            return (
-                              <div
-                                key={photo.id}
-                                className="p-2.5 rounded-2xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 flex items-center justify-between gap-3"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <img
-                                    src={imgUrl}
-                                    alt="Pending"
-                                    className="w-12 h-12 rounded-xl object-cover border border-amber-200 dark:border-amber-800"
-                                  />
-                                  <div>
-                                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1">
-                                      Dáng: {photo.poseKey}
-                                    </span>
-                                    <p className="text-[11px] text-zinc-500">
-                                      Đăng bởi: {photo.uploadedBy || "Tài khoản con"} •{" "}
-                                      {new Date(photo.createdAt).toLocaleDateString("vi-VN")}
-                                    </p>
-                                  </div>
-                                </div>
-
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => handleApprovePhoto(photo)}
-                                    title="Duyệt ảnh này"
-                                    className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleRejectPhoto(photo)}
-                                    title="Từ chối / Xóa ảnh"
-                                    className="p-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-xs"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300">
-                        🛡️ <strong>Quyền quản trị:</strong> Tài khoản được quản trị viên cấp quyền có thể duyệt ảnh và quản lý dữ liệu chung.
-                      </div>
-                    </div>
-                  ) : (
-                    /* SUB-ACCOUNT VIEW: PERMISSION NOTICE */
-                    <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 space-y-2 text-xs">
-                      <div className="flex items-center gap-2 font-bold text-zinc-800 dark:text-zinc-200">
-                        <Shield className="w-4 h-4 text-amber-500" />
-                        Chính sách phân quyền tài khoản con:
-                      </div>
-                      <ul className="space-y-1.5 text-zinc-600 dark:text-zinc-400 list-disc list-inside">
-                        <li>
-                          <strong>Thêm ảnh:</strong> Bạn có thể thêm ảnh hoặc dán ảnh (copy-paste) chất lượng cao vào các dáng mẫu.
-                        </li>
-                        <li>
-                          <strong>Phê duyệt:</strong> Ảnh bạn thêm sẽ được đưa vào hàng đợi chờ Quản trị viên (Admin) phê duyệt trước khi đồng bộ.
-                        </li>
-                        <li className="text-rose-600 dark:text-rose-400 font-medium">
-                          <strong>Bảo vệ dữ liệu:</strong> Tài khoản con không được phép xóa ảnh trên hệ thống để bảo đảm tính an toàn dữ liệu chung.
-                        </li>
-                      </ul>
-                    </div>
-                  )}
                 </div>
               ) : (
                 /* IF NOT LOGGED IN: LOGIN / REGISTER FORMS */
@@ -1070,7 +890,7 @@ export const PersonalModal: React.FC<PersonalModalProps> = ({
                     Cloud Drive Hoạt Động
                   </span>
                   <div className="font-extrabold text-base text-zinc-900 dark:text-zinc-50 mt-0.5">
-                    {cloudStatus.photosCount} ảnh chung • {cloudStatus.pendingPhotosCount || 0} ảnh chờ duyệt
+                    {cloudStatus.photosCount} ảnh chung
                   </div>
                   <p className="text-[11px] text-zinc-500">
                     Ảnh tải lên trên Web sẽ đồng bộ với ứng dụng Android khi bạn đăng nhập cùng tài khoản
