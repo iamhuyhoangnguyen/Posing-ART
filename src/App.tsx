@@ -831,8 +831,8 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Horizontal Concept Cards - Dạng ngang to rõ, dễ bấm */}
-                <div className="flex gap-2.5 overflow-x-auto pb-2 pt-0.5 scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
+                {/* Vertical Concept Cards */}
+                <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                   {canhanData.map((cat, idx) => {
                     const isActive = idx === activeCanhanCatIdx;
                     const catCompleted = cat.poses.filter((p, pIdx) => {
@@ -850,7 +850,7 @@ export default function App() {
                           setSearchQuery("");
                           setFilterStatus("all");
                         }}
-                        className={`group relative flex-shrink-0 w-44 sm:w-52 h-26 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer ${
+                        className={`group relative w-full h-28 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer ${
                           isActive
                             ? "border-2 border-amber-500 ring-2 ring-amber-500/30 shadow-md scale-[1.02]"
                             : "border-zinc-200 dark:border-zinc-800 opacity-80 hover:opacity-100 hover:shadow-xs"
@@ -907,9 +907,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setCustomModalConfig({ isOpen: true, mode: "category" })}
-                    className="flex-shrink-0 w-32 h-26 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white/50 dark:bg-zinc-900/50 flex flex-col items-center justify-center text-center p-2.5 transition-all text-zinc-500 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white/50 dark:bg-zinc-900/50 p-3 transition-all text-zinc-500 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
                   >
-                    <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mb-1">
+                    <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
                       <Plus className="w-4 h-4 text-amber-500" />
                     </div>
                     <span className="text-xs font-bold leading-tight">+ Thêm Concept</span>
@@ -918,7 +918,7 @@ export default function App() {
               </div>
             ) : currentSection === "kyyeu" ? (
               /* PHẦN 1 (KỶ YẾU): CATEGORY TABS */
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 sm:mx-0 sm:px-0 scrollbar-none sticky top-[95px] z-20 bg-[#fcfbfa]/95 dark:bg-[#09090b]/95 backdrop-blur-md py-1">
+              <div className="flex flex-col gap-2 pb-1 py-1">
                 {kyyeuData.map((cat, idx) => {
                   const isActive = idx === activeKyyeuCatIdx;
                   const catCompleted = cat.poses.filter((p, pIdx) => {
@@ -933,7 +933,7 @@ export default function App() {
                         setActiveKyyeuCatIdx(idx);
                         setFilterStatus("all");
                       }}
-                      className={`flex-shrink-0 px-4 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+                      className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-between gap-3 active:scale-[0.99] ${
                         isActive
                           ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 shadow-sm"
                           : "bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300"
