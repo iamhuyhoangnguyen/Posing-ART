@@ -85,6 +85,8 @@ const USER_RECORD_TYPES = new Set<UserCloudRecord["type"]>([
   "favorite", "savedPose", "collection", "generatedIdea", "personalConcept", "setting", "profile",
 ]);
 const MAX_USER_RECORD_BYTES = 5 * 1024 * 1024;
+const AUTH_TOKEN_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
+const AUTH_TOKEN_REFRESH_GRACE_SECONDS = 60 * 60 * 24 * 30;
 
 function isValidUserCloudRecord(record: unknown): record is UserCloudRecord {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
@@ -187,7 +189,7 @@ function createAuthToken(user: Pick<StoredUser, "id" | "role">): string {
   const payload = Buffer.from(JSON.stringify({
     sub: user.id,
     role: user.role,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+    exp: Math.floor(Date.now() / 1000) + AUTH_TOKEN_LIFETIME_SECONDS,
   } satisfies AuthClaims)).toString("base64url");
   const signature = createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
   return `${payload}.${signature}`;
@@ -208,6 +210,37 @@ function getAuthenticatedUser(req: express.Request): StoredUser | null {
   } catch {
     return null;
   }
+}
+
+function getSignedAuthClaims(token: string): AuthClaims | null {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", TOKEN_SECRET).update(payload).digest();
+  const received = Buffer.from(signature, "base64url");
+  if (received.length !== expected.length || !timingSafeEqual(expected, received)) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as AuthClaims;
+    return claims.sub && Number.isFinite(claims.exp) && ["admin", "member"].includes(claims.role)
+      ? claims
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAuthenticationFailureReason(req: express.Request): string {
+  const authorization = req.headers.authorization || "";
+  if (!authorization) return "missing_authorization_header";
+  if (!/^Bearer\s+/i.test(authorization)) return "missing_or_malformed_bearer_token";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return "missing_or_malformed_bearer_token";
+  const claims = getSignedAuthClaims(token);
+  if (!claims) return "malformed_token_or_invalid_signature";
+  if (claims.exp <= Math.floor(Date.now() / 1000)) return "token_expired";
+  const user = cloudStore.users.find((candidate) => candidate.id === claims.sub);
+  if (!user) return "user_not_found";
+  if (user.role !== claims.role) return "role_mismatch";
+  return "unknown_authentication_failure";
 }
 
 function requireUser(req: express.Request, res: express.Response): StoredUser | null {
@@ -652,6 +685,27 @@ app.post("/api/auth/login", (req, res) => {
   }
 });
 
+// Refresh a signed access token during a short grace period after expiry.
+app.post("/api/auth/refresh", (req, res) => {
+  const authorization = req.headers.authorization || "";
+  const token = /^Bearer\s+/i.test(authorization)
+    ? authorization.replace(/^Bearer\s+/i, "").trim()
+    : "";
+  const claims = token ? getSignedAuthClaims(token) : null;
+  const now = Math.floor(Date.now() / 1000);
+
+  if (!claims || claims.exp < now - AUTH_TOKEN_REFRESH_GRACE_SECONDS) {
+    return res.status(401).json({ success: false, error: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại." });
+  }
+
+  const user = cloudStore.users.find((candidate) => candidate.id === claims.sub);
+  if (!user || user.role !== claims.role) {
+    return res.status(401).json({ success: false, error: "Tài khoản không còn hợp lệ. Vui lòng đăng nhập lại." });
+  }
+
+  res.json({ success: true, token: createAuthToken(user) });
+});
+
 // Register sub-account: NO Gmail or external account needed
 app.post("/api/auth/register", asyncRoute(async (req, res) => {
   try {
@@ -1047,7 +1101,10 @@ app.post("/api/user/record", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) {
-      console.warn("[User Record Sync] Rejected unauthenticated record request", recordLogContext);
+      console.warn("[User Record Sync] Rejected unauthenticated record request", {
+        ...recordLogContext,
+        authFailure: getAuthenticationFailureReason(req),
+      });
       return;
     }
     const record = req.body as UserCloudRecord;

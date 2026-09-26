@@ -34,6 +34,48 @@ export function getCurrentUser(): UserAccount | null {
   }
 }
 
+export async function refreshCurrentUserSession(expectedUser?: UserAccount): Promise<UserAccount | null> {
+  const currentUser = getCurrentUser();
+  if (!currentUser || (expectedUser && currentUser.id !== expectedUser.id)) return null;
+  if (expectedUser?.token && currentUser.token !== expectedUser.token) return currentUser;
+
+  try {
+    const response = await fetch(serverUrl("/api/auth/refresh"), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${currentUser.token || ""}` },
+    });
+    if (!response.ok) {
+      let errorMessage = response.statusText;
+      try {
+        const result = await response.json();
+        if (typeof result.error === "string") errorMessage = result.error;
+      } catch {
+        // Keep the HTTP status text if the response is not JSON.
+      }
+      console.warn("[Auth] Session refresh rejected:", {
+        status: response.status,
+        error: errorMessage,
+      });
+      if (response.status === 401) {
+        const latestUser = getCurrentUser();
+        if (latestUser?.id === currentUser.id && latestUser.token === currentUser.token) {
+          logoutUser();
+        }
+      }
+      return null;
+    }
+
+    const result = await response.json();
+    if (typeof result.token !== "string" || !result.token) return null;
+    const refreshedUser = { ...currentUser, token: result.token };
+    saveUserSession(refreshedUser, getSavedSessionSetting());
+    return refreshedUser;
+  } catch (error) {
+    console.warn("[Auth] Session refresh request failed:", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 export function isUserLoggedIn(): boolean {
   return getCurrentUser() !== null;
 }

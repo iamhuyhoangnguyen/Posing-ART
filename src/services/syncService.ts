@@ -1,10 +1,61 @@
 import { UserCloudRecord, CloudRecordType, UserCloudSyncResponse } from "../types/sync";
-import { getCurrentUser } from "../utils/userAuth";
+import { UserAccount } from "../types";
+import { getCurrentUser, refreshCurrentUserSession } from "../utils/userAuth";
 import { serverUrl } from "./apiUrl";
 
 const LOCAL_RECORDS_KEY_PREFIX = "posing_art_cloud_cache_";
 const OFFLINE_QUEUE_KEY = "posing_art_offline_sync_queue";
 const LAST_SYNC_KEY_PREFIX = "posing_art_last_sync_timestamp_";
+const TOKEN_REFRESH_BUFFER_SECONDS = 5 * 60;
+
+function getTokenExpiration(token: string): number | null {
+  try {
+    const payload = token.split(".")[0];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
+    return Number.isFinite(claims.exp) ? claims.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWithUserAuth(
+  url: string,
+  init: RequestInit,
+  expectedUser: UserAccount,
+): Promise<Response> {
+  let user = getCurrentUser();
+  if (!user || user.id !== expectedUser.id || !user.token) {
+    throw new Error("Phiên đăng nhập không còn hợp lệ. Vui lòng đăng nhập lại.");
+  }
+
+  const expiration = getTokenExpiration(user.token);
+  if (expiration === null || expiration <= Math.floor(Date.now() / 1000) + TOKEN_REFRESH_BUFFER_SECONDS) {
+    const refreshedUser = await refreshCurrentUserSession(user);
+    if (refreshedUser) {
+      user = refreshedUser;
+    } else if (expiration === null || expiration <= Math.floor(Date.now() / 1000)) {
+      throw new Error("Không thể làm mới phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+    }
+  }
+
+  const send = (activeUser: UserAccount) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${activeUser.token || ""}`);
+    headers.set("x-user-id", activeUser.id);
+    return fetch(url, { ...init, headers });
+  };
+
+  let response = await send(user);
+  if (response.status === 401) {
+    const refreshedUser = await refreshCurrentUserSession(user);
+    if (refreshedUser && refreshedUser.token !== user.token) {
+      response = await send(refreshedUser);
+    }
+  }
+  return response;
+}
 
 /**
  * Read cached records for user
@@ -113,19 +164,17 @@ async function performFullSyncInternal(): Promise<FullSyncResult> {
   try {
     // 1. If we have offline queued records, push them first
     if (offlineQueue.length > 0) {
-      const pushRes = await fetch(serverUrl("/api/user/sync"), {
+      const pushRes = await fetchWithUserAuth(serverUrl("/api/user/sync"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${user.token || ""}`,
-          "x-user-id": userId,
         },
         body: JSON.stringify({
           userId,
           records: offlineQueue,
           clientTime: Date.now(),
         }),
-      });
+      }, user);
 
       if (pushRes.ok) {
         syncedOfflineCount = offlineQueue.length;
@@ -153,12 +202,11 @@ async function performFullSyncInternal(): Promise<FullSyncResult> {
     }
 
     // 2. Fetch full user cloud records from server
-    const fetchRes = await fetch(serverUrl(`/api/user/sync?userId=${encodeURIComponent(userId)}`), {
-      headers: {
-        Authorization: `Bearer ${user.token || ""}`,
-        "x-user-id": userId,
-      },
-    });
+    const fetchRes = await fetchWithUserAuth(
+      serverUrl(`/api/user/sync?userId=${encodeURIComponent(userId)}`),
+      { headers: {} },
+      user,
+    );
 
     if (!fetchRes.ok) {
       throw new Error(`Server returned status ${fetchRes.status}`);
@@ -240,15 +288,13 @@ export async function syncRecord<T = any>(
   // 2. If logged in, push to server or queue offline
   if (user) {
     try {
-      const res = await fetch(serverUrl("/api/user/record"), {
+      const res = await fetchWithUserAuth(serverUrl("/api/user/record"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${user.token || ""}`,
-          "x-user-id": userId,
         },
         body: JSON.stringify(record),
-      });
+      }, user);
 
       if (!res.ok) {
         let serverError = "";
