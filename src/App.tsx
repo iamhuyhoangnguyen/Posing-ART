@@ -18,6 +18,9 @@ import {
   Mic,
   Send,
   User,
+  WifiOff,
+  ListChecks,
+  FileImage,
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
@@ -25,6 +28,8 @@ import { getPhotoCounts } from "./utils/db";
 import { Header } from "./components/Header";
 import { PoseCard } from "./components/PoseCard";
 import { CategoryImageCard } from "./components/CategoryImageCard";
+import { OfflineImage } from "./components/OfflineImage";
+import type { ReferenceSheetPose } from "./components/ReferenceSheetModal";
 const PoseModal = lazy(() => import("./components/PoseModal").then((module) => ({ default: module.PoseModal })));
 const AIPoseAdvisorModal = lazy(() => import("./components/AIPoseAdvisorModal").then((module) => ({ default: module.AIPoseAdvisorModal })));
 const BackupModal = lazy(() => import("./components/BackupModal").then((module) => ({ default: module.BackupModal })));
@@ -32,6 +37,7 @@ const AddCustomPoseModal = lazy(() => import("./components/AddCustomPoseModal").
 const EditCoverModal = lazy(() => import("./components/EditCoverModal").then((module) => ({ default: module.EditCoverModal })));
 const InstallGuideModal = lazy(() => import("./components/InstallGuideModal").then((module) => ({ default: module.InstallGuideModal })));
 const PersonalModal = lazy(() => import("./components/PersonalModal").then((module) => ({ default: module.PersonalModal })));
+const ReferenceSheetModal = lazy(() => import("./components/ReferenceSheetModal").then((module) => ({ default: module.ReferenceSheetModal })));
 import { AddIdeaCard } from "./components/AddIdeaCard";
 import { InspirationBar } from "./components/InspirationBar";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
@@ -124,6 +130,9 @@ export default function App() {
   const [activeKyyeuCatIdx, setActiveKyyeuCatIdx] = useState(0);
   const [activeCanhanCatIdx, setActiveCanhanCatIdx] = useState(0);
   const [isCategoryDetailOpen, setIsCategoryDetailOpen] = useState(false);
+  const [isSelectingSheetPoses, setIsSelectingSheetPoses] = useState(false);
+  const [referenceSheetPoses, setReferenceSheetPoses] = useState<ReferenceSheetPose[]>([]);
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
   // Search query & filter status
   const [searchQuery, setSearchQuery] = useState("");
@@ -148,6 +157,7 @@ export default function App() {
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showReferenceSheet, setShowReferenceSheet] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState<{
@@ -158,6 +168,22 @@ export default function App() {
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [canInstallPwa, setCanInstallPwa] = useState(false);
+
+  useEffect(() => {
+    const updateNetworkState = () => setIsOffline(!navigator.onLine);
+    window.addEventListener("online", updateNetworkState);
+    window.addEventListener("offline", updateNetworkState);
+    return () => {
+      window.removeEventListener("online", updateNetworkState);
+      window.removeEventListener("offline", updateNetworkState);
+    };
+  }, []);
+
+  const toggleReferenceSheetPose = (pose: PoseItem, categoryName: string, key: string) => {
+    setReferenceSheetPoses((selected) => selected.some((item) => item.key === key)
+      ? selected.filter((item) => item.key !== key)
+      : [...selected, { key, title: pose.title, categoryName, imageUrl: pose.coverImage }]);
+  };
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -626,6 +652,12 @@ export default function App() {
         onCycleTheme={handleCycleTheme}
       />
 
+      {isOffline && (
+        <div role="status" className="flex items-center justify-center gap-2 border-b border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900 dark:border-amber-900 dark:bg-amber-950/70 dark:text-amber-200">
+          <WifiOff className="h-4 w-4" /> Đang xem bản offline
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-5 pb-24">
         {(currentSection === "kyyeu" || currentSection === "canhan") && (
@@ -682,6 +714,25 @@ export default function App() {
                 categoryLabel={currentCategory.label}
               />
             )}
+            {currentCategory && isCategoryDetailOpen && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  {isSelectingSheetPoses ? "Chạm các dáng muốn đưa vào tờ tham khảo" : "Có thể chọn dáng từ nhiều chủ đề"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsSelectingSheetPoses((active) => !active)}
+                  aria-pressed={isSelectingSheetPoses}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold ${
+                    isSelectingSheetPoses
+                      ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+                  }`}
+                >
+                  <ListChecks className="h-3.5 w-3.5" /> {isSelectingSheetPoses ? "Xong chọn" : "Chọn dáng"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -734,10 +785,11 @@ export default function App() {
                 }}
                 className="group relative h-60 sm:h-72 rounded-3xl overflow-hidden cursor-pointer shadow-md hover:shadow-2xl border border-zinc-200/80 dark:border-zinc-800 card-hover-glow"
               >
-                <img
+                <OfflineImage
                   src={kyyeuCover}
                   alt="Kỷ yếu"
                   className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  wrapperClassName="absolute inset-0"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
@@ -799,10 +851,11 @@ export default function App() {
                 }}
                 className="group relative h-60 sm:h-72 rounded-3xl overflow-hidden cursor-pointer shadow-md hover:shadow-2xl border border-zinc-200/80 dark:border-zinc-800 card-hover-glow"
               >
-                <img
+                <OfflineImage
                   src={canhanCover}
                   alt="Cá nhân"
                   className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  wrapperClassName="absolute inset-0"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
@@ -1143,13 +1196,14 @@ export default function App() {
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
             {currentSection === "kyyeu" && isCategoryDetailOpen && currentCategory && !searchQuery && (
               <div className="relative rounded-3xl overflow-hidden h-36 sm:h-44 border border-zinc-200 dark:border-zinc-800 shadow-sm group">
-                <img
+                <OfflineImage
                   src={
                     currentCategory.coverImage ||
                     "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80"
                   }
                   alt={currentCategory.label}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                  wrapperClassName="absolute inset-0"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
@@ -1202,13 +1256,13 @@ export default function App() {
                       poseKey={poseKey}
                       isDone={isDone}
                       photoCount={count}
-                      onClick={() =>
-                        setActivePoseModal({
-                          pose,
-                          categoryName: currentCategory.label,
-                          poseKey,
-                        })
-                      }
+                      onClick={() => isSelectingSheetPoses
+                        ? toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
+                        : setActivePoseModal({ pose, categoryName: currentCategory.label, poseKey })}
+                      isSelectedForSheet={referenceSheetPoses.some((item) => item.key === poseKey)}
+                      onToggleSheetSelection={isSelectingSheetPoses
+                        ? () => toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
+                        : undefined}
                       onToggleDoneQuick={(e) => {
                         e.stopPropagation();
                         handleToggleDone(poseKey);
@@ -1310,6 +1364,19 @@ export default function App() {
           <Sparkles className="w-5 h-5 animate-pulse" />
         </button>
       </div>
+
+      {referenceSheetPoses.length > 0 && (
+        <div className="fixed bottom-5 left-4 z-30 flex max-w-[calc(100vw-5rem)] items-center gap-2 rounded-2xl border border-amber-300 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-amber-800 dark:bg-zinc-900/95">
+          <button
+            type="button"
+            onClick={() => setShowReferenceSheet(true)}
+            className="flex items-center gap-2 rounded-xl bg-amber-500 px-3 py-2.5 text-xs font-extrabold text-zinc-950"
+          >
+            <FileImage className="h-4 w-4" /> Tờ tham khảo ({referenceSheetPoses.length})
+          </button>
+          <button type="button" onClick={() => setReferenceSheetPoses([])} aria-label="Xóa các dáng đã chọn" className="rounded-lg px-2 py-1 text-xs font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Xóa</button>
+        </div>
+      )}
 
       {/* MODAL 1: POSE DETAIL */}
       {activePoseModal && (
@@ -1416,6 +1483,9 @@ export default function App() {
         onDownloadHtmlOffline={() => exportSingleFileHtml(kyyeuData, canhanData)}
         onSyncComplete={refreshPhotoCounts}
       />}
+      {showReferenceSheet && (
+        <ReferenceSheetModal poses={referenceSheetPoses} onClose={() => setShowReferenceSheet(false)} />
+      )}
     </div>
     </Suspense>
   );

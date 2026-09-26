@@ -1,6 +1,7 @@
 import React from "react";
 import { CheckCircle2 } from "lucide-react";
 import type { CategoryItem } from "../types";
+import { OfflineImage } from "./OfflineImage";
 
 interface CategoryImageCardProps {
   category: CategoryItem;
@@ -28,11 +29,12 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
         : "border-zinc-200 dark:border-zinc-800 opacity-95 hover:opacity-100 hover:shadow-md"
     }`}
   >
-    <img
+    <OfflineImage
       src={category.coverImage || FALLBACK_COVER}
       alt={category.label}
       loading="lazy"
       className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      wrapperClassName="absolute inset-0"
     />
     <div
       className={`absolute inset-0 transition-colors ${

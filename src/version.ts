@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.4.1";
-export const APP_BUILD_NUMBER = 241;
+export const APP_VERSION = "2.5.0";
+export const APP_BUILD_NUMBER = 250;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 2.5.0: xem lại ảnh đã tải offline, tạo tờ tham khảo từ nhiều dáng và chuyển ảnh mượt hơn.",
   "Phiên bản 2.4.1: giới hạn 30 ảnh cho mỗi chủ đề và dọn nút tạo dáng AI không còn được sử dụng.",
   "Phiên bản 2.4: căn chỉnh vùng ảnh bìa trước khi lưu, lướt ảnh tham khảo bằng thao tác vuốt và cải thiện tải ảnh RedNote.",
   "Phiên bản 2.3.2: ảnh bìa từ Pinterest/RedNote được tải và lưu trong app thay vì hotlink.",

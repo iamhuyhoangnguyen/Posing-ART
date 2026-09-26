@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { motion } from "framer-motion";
 import {
   X,
   CheckCircle2,
@@ -566,12 +567,30 @@ export const PoseModal: React.FC<PoseModalProps> = ({
             </>
           )}
 
-          <img
+          <motion.img
+            key={lightboxPhotoIndex}
             src={photosWithUrls[lightboxPhotoIndex].url}
             alt="Phóng to"
-            className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
+            className="max-w-full max-h-[78vh] object-contain rounded-xl shadow-2xl"
+            initial={{ opacity: 0, scale: 0.985, x: 10 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
             onClick={(e) => e.stopPropagation()}
           />
+          {photosWithUrls.length > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-1.5" onClick={(event) => event.stopPropagation()} aria-label={`Ảnh ${lightboxPhotoIndex + 1} trên ${photosWithUrls.length}`}>
+              {photosWithUrls.map((entry, index) => (
+                <button
+                  key={entry.photo.id}
+                  type="button"
+                  onClick={() => setLightboxPhotoIndex(index)}
+                  aria-label={`Mở ảnh ${index + 1}`}
+                  aria-current={index === lightboxPhotoIndex ? "true" : undefined}
+                  className={`h-2 rounded-full transition-all ${index === lightboxPhotoIndex ? "w-5 bg-white" : "w-2 bg-white/40 hover:bg-white/70"}`}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

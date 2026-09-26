@@ -8,6 +8,7 @@ import {
   Camera,
 } from "lucide-react";
 import { PoseItem } from "../types";
+import { OfflineImage } from "./OfflineImage";
 
 interface PoseCardProps {
   pose: PoseItem;
@@ -17,6 +18,8 @@ interface PoseCardProps {
   onClick: () => void;
   onToggleDoneQuick?: (e: React.MouseEvent) => void;
   onEditCover?: (e: React.MouseEvent) => void;
+  isSelectedForSheet?: boolean;
+  onToggleSheetSelection?: (e: React.MouseEvent) => void;
 }
 
 export const PoseCard: React.FC<PoseCardProps> = ({
@@ -27,6 +30,8 @@ export const PoseCard: React.FC<PoseCardProps> = ({
   onClick,
   onToggleDoneQuick,
   onEditCover,
+  isSelectedForSheet = false,
+  onToggleSheetSelection,
 }) => {
   return (
     <div
@@ -40,15 +45,12 @@ export const PoseCard: React.FC<PoseCardProps> = ({
       {/* Photo Cover Preview Area (REPLACES STICK-FIGURE COMPLETELY) */}
       <div className="relative w-full aspect-[4/3] bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
         {pose.coverImage ? (
-          <img
+          <OfflineImage
             src={pose.coverImage}
             alt={pose.title}
             className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 ease-out"
             loading="lazy"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src =
-                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80";
-            }}
+            wrapperClassName="w-full h-full"
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-amber-500/10 via-zinc-100 to-amber-500/5 dark:from-zinc-800 dark:to-zinc-900 text-zinc-400">
@@ -71,6 +73,23 @@ export const PoseCard: React.FC<PoseCardProps> = ({
         >
           <CheckCircle2 className="w-4 h-4 fill-current" />
         </button>
+
+        {onToggleSheetSelection && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleSheetSelection(event);
+            }}
+            aria-label={isSelectedForSheet ? "Bỏ chọn dáng" : "Chọn dáng vào tờ tham khảo"}
+            aria-pressed={isSelectedForSheet}
+            className={`absolute bottom-2 right-2 z-10 rounded-full border p-1.5 text-white shadow-md ${
+              isSelectedForSheet ? "border-amber-300 bg-amber-500" : "border-white/60 bg-black/55"
+            }`}
+          >
+            <CheckCircle2 className="h-4 w-4" />
+          </button>
+        )}
 
         {/* Top-Right Badges: Photos count & Pencil edit cover button */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5">
