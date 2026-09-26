@@ -68,6 +68,9 @@ interface CloudPhotoItem {
   createdAt: number;
 }
 
+const MAX_PHOTO_DATA_URL_LENGTH = 14_000_000;
+const PHOTO_TOO_LARGE_ERROR = "Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn 10 MB";
+
 export interface UserCloudRecord {
   id: string;
   userId: string;
@@ -253,6 +256,32 @@ function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function isMongoDocumentTooLargeError(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  const messages: string[] = [];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+
+    const candidate = current as {
+      message?: unknown;
+      code?: unknown;
+      cause?: unknown;
+      writeErrors?: unknown;
+    };
+    if (candidate.code === 10334 || candidate.code === "BSONObjectTooLarge") return true;
+    if (typeof candidate.message === "string") messages.push(candidate.message);
+    if (candidate.cause) pending.push(candidate.cause);
+    if (Array.isArray(candidate.writeErrors)) pending.push(...candidate.writeErrors);
+  }
+
+  return /bson[^\n]*(?:too large|maximum size|size[^\n]*exceed|exceed[^\n]*size)|document[^\n]*(?:too large|maximum size|exceed)|object to insert too large/i
+    .test(messages.join(" "));
 }
 
 app.use("/api/auth/login", rateLimit(10, 15 * 60 * 1000));
@@ -719,8 +748,11 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
     if (!poseKey || !dataUrl) {
       return res.status(400).json({ error: "Thiếu dữ liệu poseKey hoặc ảnh dataUrl" });
     }
-    if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp|gif);base64,/i.test(dataUrl) || dataUrl.length > 20_000_000) {
+    if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp|gif);base64,/i.test(dataUrl)) {
       return res.status(400).json({ error: "Ảnh không hợp lệ hoặc vượt quá dung lượng cho phép" });
+    }
+    if (dataUrl.length > MAX_PHOTO_DATA_URL_LENGTH) {
+      return res.status(413).json({ error: PHOTO_TOO_LARGE_ERROR });
     }
     if (typeof localPhotoId === "string" && localPhotoId.length > 128) {
       return res.status(400).json({ error: "Mã ảnh cục bộ không hợp lệ" });
@@ -751,6 +783,9 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
 
     res.json({ success: true, photo: newPhoto });
   } catch (err: any) {
+    if (isMongoDocumentTooLargeError(err)) {
+      return res.status(413).json({ error: PHOTO_TOO_LARGE_ERROR });
+    }
     res.status(500).json({ error: err.message || "Lỗi lưu ảnh lên Cloud Drive" });
   }
 }));
