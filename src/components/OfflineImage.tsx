@@ -13,7 +13,15 @@ export const OfflineImage: React.FC<OfflineImageProps> = ({
   ...imageProps
 }) => {
   const [failed, setFailed] = useState(false);
-  const [offline, setOffline] = useState(!navigator.onLine);
+  const [offline, setOffline] = useState(
+    () => typeof navigator !== "undefined" && !navigator.onLine,
+  );
+
+  // Keep the caller's layout position intact. Adding `relative` unconditionally
+  // conflicts with callers that position this wrapper absolutely; Tailwind can
+  // then make the wrapper collapse and hide both the image and its placeholder.
+  const isPositionedByCaller = /\b(absolute|fixed|sticky)\b/.test(wrapperClassName);
+  const positionClass = isPositionedByCaller ? "" : "relative";
 
   useEffect(() => {
     const handleOnline = () => {
@@ -32,14 +40,17 @@ export const OfflineImage: React.FC<OfflineImageProps> = ({
   useEffect(() => setFailed(false), [src]);
 
   return (
-    <div className={`relative overflow-hidden ${wrapperClassName}`}>
+    <div className={`${positionClass} overflow-hidden ${wrapperClassName}`}>
       {!failed && src && (
         <img
           {...imageProps}
           src={src}
           alt={alt}
           className={className}
-          onError={() => setFailed(true)}
+          onError={() => {
+            setOffline(typeof navigator !== "undefined" && !navigator.onLine);
+            setFailed(true);
+          }}
         />
       )}
       {(failed || !src) && (
