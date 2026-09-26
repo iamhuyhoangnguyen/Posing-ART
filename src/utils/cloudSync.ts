@@ -9,7 +9,7 @@ export interface CloudPhotoItem {
   id: string;
   localPhotoId?: string;
   poseKey: string;
-  dataUrl: string;
+  dataUrl?: string;
   note?: string;
   uploadedBy?: string;
   uploaderRole?: "admin" | "member";
@@ -199,7 +199,7 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     uploaded = await syncPendingLocalPhotos();
 
     // Fetch cloud data after uploads so this device sees its newly shared photos.
-    const res = await fetch(serverUrl("/api/cloud/sync"));
+    const res = await fetch(serverUrl("/api/cloud/sync?metadataOnly=true"));
     if (!res.ok) {
       return { connected: false, downloaded: 0, uploaded, totalCloudPhotos: 0 };
     }
@@ -218,7 +218,11 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
       for (const cp of cloudData.photos) {
         if (!localCloudIds.has(cp.id)) {
           try {
-            const photoRes = await fetch(cp.dataUrl);
+            const contentRes = await fetch(serverUrl(`/api/cloud/photo/${encodeURIComponent(cp.id)}/content`));
+            if (!contentRes.ok) throw new Error(`Cloud photo content request failed (${contentRes.status})`);
+            const contentData = await contentRes.json() as { photo?: { dataUrl?: string } };
+            if (!contentData.photo?.dataUrl) throw new Error("Cloud photo response did not include image data");
+            const photoRes = await fetch(contentData.photo.dataUrl);
             const blob = await photoRes.blob();
             await new Promise<void>((resolve, reject) => {
               const tx = db.transaction("photos", "readwrite");

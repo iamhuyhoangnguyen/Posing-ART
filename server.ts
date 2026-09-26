@@ -777,8 +777,16 @@ app.get("/api/cloud/status", (_req, res) => {
 
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
+  const metadataOnly = _req.query.metadataOnly === "true";
   const photos = cloudStore.photos.map(({ id, poseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
-    id, poseKey, dataUrl, note, uploadedBy, uploaderRole, status: "approved" as const, createdAt,
+    id,
+    poseKey,
+    ...(!metadataOnly ? { dataUrl } : {}),
+    note,
+    uploadedBy,
+    uploaderRole,
+    status: "approved" as const,
+    createdAt,
   }));
   res.json({
     success: true,
@@ -787,6 +795,13 @@ app.get("/api/cloud/sync", (_req, res) => {
     customCategories: cloudStore.customCategories,
     updatedAt: cloudStore.updatedAt,
   });
+});
+
+// Fetch image bytes only for photos that are missing from the requesting device.
+app.get("/api/cloud/photo/:id/content", (req, res) => {
+  const photo = cloudStore.photos.find((item) => item.id === req.params.id);
+  if (!photo) return res.status(404).json({ success: false, error: "Không tìm thấy ảnh" });
+  res.json({ success: true, photo: { id: photo.id, dataUrl: photo.dataUrl } });
 });
 
 // 3. Upload Photo to Cloud Drive; every authenticated account's photo is immediately shared.
