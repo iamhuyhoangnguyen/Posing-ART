@@ -95,6 +95,8 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   const [resolvingInspiration, setResolvingInspiration] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkPreviewUrl, setLinkPreviewUrl] = useState<string | null>(null);
+  const [selectedInspirationImageUrl, setSelectedInspirationImageUrl] = useState<string | null>(null);
+  const [savingImage, setSavingImage] = useState(false);
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -103,6 +105,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     setSelectedImage(currentImage || "");
     setInputUrl("");
     setLinkPreviewUrl(null);
+    setSelectedInspirationImageUrl(null);
     setClipboardNotice(null);
     setLinkError(null);
   }, [currentImage, isOpen]);
@@ -228,6 +231,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
         throw new Error(result.error || "Không lấy được ảnh từ liên kết này.");
       }
       setLinkPreviewUrl(result.imageUrl);
+      setSelectedInspirationImageUrl(null);
       setInputUrl("");
     } catch (error) {
       setLinkError(error instanceof Error ? error.message : "Không lấy được ảnh từ liên kết này.");
@@ -237,14 +241,32 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   };
 
   const handleSave = async () => {
+    if (!selectedImage || savingImage) return;
+    setSavingImage(true);
+    setLinkError(null);
     try {
-      const imageUrl = selectedImage.startsWith("blob:")
-        ? await compressBlobToDataUrl(await fetch(selectedImage).then((response) => response.blob()))
-        : selectedImage;
+      let imageUrl = selectedImage;
+      if (selectedInspirationImageUrl && selectedImage === selectedInspirationImageUrl) {
+        const response = await fetch(serverUrl("/api/inspiration/download-image"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: selectedInspirationImageUrl }),
+        });
+        const result = await response.json();
+        if (!response.ok || typeof result.dataUrl !== "string") {
+          throw new Error(result.error || "Không tải được ảnh từ nguồn. Ảnh chưa được lưu.");
+        }
+        imageUrl = await compressBlobToDataUrl(await fetch(result.dataUrl).then((imageResponse) => imageResponse.blob()));
+      } else if (selectedImage.startsWith("blob:")) {
+        imageUrl = await compressBlobToDataUrl(await fetch(selectedImage).then((response) => response.blob()));
+      }
       await onSave(imageUrl);
       onClose();
     } catch (error) {
       console.error("Unable to save cover image:", error);
+      setLinkError(error instanceof Error ? error.message : "Không thể tải và lưu ảnh. Vui lòng thử lại.");
+    } finally {
+      setSavingImage(false);
     }
   };
 
@@ -447,11 +469,13 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                     type="button"
                     onClick={() => {
                       setSelectedImage(linkPreviewUrl);
+                      setSelectedInspirationImageUrl(linkPreviewUrl);
+                      setLinkError(null);
                       setClipboardNotice("Đã chọn ảnh xem trước. Nhấn Lưu để áp dụng.");
                     }}
                     className="mt-1 text-[10px] font-bold text-amber-700 underline underline-offset-2 dark:text-amber-300"
                   >
-                    {selectedImage === linkPreviewUrl ? "Đã chọn ảnh này" : "Dùng ảnh này"}
+                  {selectedImage === linkPreviewUrl ? "Đã chọn · sẽ tải ảnh về khi lưu" : "Dùng ảnh này"}
                   </button>
                 </div>
               </div>
@@ -523,10 +547,11 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
             <button
               type="button"
               onClick={handleSave}
+              disabled={!selectedImage || savingImage}
               className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-md active:scale-95 transition-all flex items-center gap-1.5"
             >
-              <Check className="w-3.5 h-3.5" />
-              Lưu Thay Đổi
+              {savingImage ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              {savingImage ? "Đang tải và lưu ảnh..." : "Lưu Thay Đổi"}
             </button>
           </div>
         </div>

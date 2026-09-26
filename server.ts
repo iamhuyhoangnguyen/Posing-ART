@@ -808,6 +808,7 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
 
 const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com"];
 const MAX_INSPIRATION_HTML_BYTES = 2_000_000;
+const MAX_INSPIRATION_IMAGE_BYTES = 10 * 1024 * 1024;
 
 function isPublicInternetAddress(address: string): boolean {
   const version = isIP(address);
@@ -865,6 +866,34 @@ async function validateInspirationPageUrl(value: string): Promise<URL> {
   }
   if (!resolvedAddresses.length || resolvedAddresses.some(({ address }) => !isPublicInternetAddress(address))) {
     throw Object.assign(new Error("Liên kết trỏ tới địa chỉ IP nội bộ hoặc không an toàn."), { statusCode: 400 });
+  }
+  return url;
+}
+
+async function validatePublicInspirationImageUrl(value: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Địa chỉ ảnh xem trước không hợp lệ.");
+  }
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const normalizedIp = hostname.replace(/^\[|\]$/g, "");
+  if (
+    url.protocol !== "https:" || (url.port && url.port !== "443") || url.username || url.password ||
+    isIP(normalizedIp) !== 0 || hostname === "localhost" || hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") || hostname.endsWith(".internal")
+  ) {
+    throw new Error("Địa chỉ ảnh xem trước không an toàn.");
+  }
+  let addresses: Array<{ address: string; family: number }>;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw new Error("Không thể xác minh máy chủ ảnh xem trước.");
+  }
+  if (!addresses.length || addresses.some(({ address }) => !isPublicInternetAddress(address))) {
+    throw new Error("Địa chỉ ảnh xem trước trỏ tới máy chủ không an toàn.");
   }
   return url;
 }
@@ -950,6 +979,61 @@ async function getInspirationOgImage(value: string): Promise<{ imageUrl: string;
   throw new Error("Không thể theo liên kết chuyển hướng.");
 }
 
+async function downloadInspirationImage(value: string): Promise<string> {
+  let imageUrl = await validatePublicInspirationImageUrl(value);
+  for (let redirectCount = 0; redirectCount <= 4; redirectCount++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
+    try {
+      const response = await fetch(imageUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { Accept: "image/jpeg,image/png,image/webp,image/gif", "User-Agent": "PosingART-CoverImage/1.0" },
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location || redirectCount === 4) throw new Error("Ảnh nguồn chuyển hướng quá nhiều lần.");
+        imageUrl = await validatePublicInspirationImageUrl(new URL(location, imageUrl).toString());
+        continue;
+      }
+      if (!response.ok) throw new Error(`Không tải được ảnh nguồn (${response.status}).`);
+      const mimeType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+      if (!mimeType || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mimeType)) {
+        throw new Error("Nguồn không trả về định dạng ảnh được hỗ trợ.");
+      }
+      const contentLength = Number(response.headers.get("content-length"));
+      if (Number.isFinite(contentLength) && contentLength > MAX_INSPIRATION_IMAGE_BYTES) {
+        throw new Error("Ảnh nguồn vượt quá giới hạn 10 MB.");
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Không đọc được nội dung ảnh nguồn.");
+      const chunks: Uint8Array[] = [];
+      let byteLength = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        byteLength += value.byteLength;
+        if (byteLength > MAX_INSPIRATION_IMAGE_BYTES) {
+          await reader.cancel();
+          throw new Error("Ảnh nguồn vượt quá giới hạn 10 MB.");
+        }
+        chunks.push(value);
+      }
+      if (byteLength === 0) throw new Error("Ảnh nguồn không có dữ liệu.");
+      const bytes = new Uint8Array(byteLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error("Không thể theo liên kết ảnh chuyển hướng.");
+}
+
 app.post("/api/inspiration/og-image", asyncRoute(async (req, res) => {
   const url = req.body?.url;
   if (typeof url !== "string" || !url.trim() || url.length > 2_048) {
@@ -962,6 +1046,22 @@ app.post("/api/inspiration/og-image", asyncRoute(async (req, res) => {
     return res.status(error?.statusCode || 502).json({
       success: false,
       error: error?.message || "Không thể lấy ảnh xem trước từ liên kết này.",
+    });
+  }
+}));
+
+app.post("/api/inspiration/download-image", asyncRoute(async (req, res) => {
+  const imageUrl = req.body?.imageUrl;
+  if (typeof imageUrl !== "string" || !imageUrl.trim() || imageUrl.length > 4_096) {
+    return res.status(400).json({ success: false, error: "Địa chỉ ảnh xem trước không hợp lệ." });
+  }
+  try {
+    const dataUrl = await downloadInspirationImage(imageUrl.trim());
+    return res.json({ success: true, dataUrl });
+  } catch (error: any) {
+    return res.status(502).json({
+      success: false,
+      error: error?.message || "Không thể tải ảnh xem trước. Hãy thử ảnh khác hoặc tải ảnh lên từ thiết bị.",
     });
   }
 }));
