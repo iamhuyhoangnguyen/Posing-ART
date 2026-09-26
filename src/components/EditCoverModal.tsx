@@ -19,7 +19,7 @@ interface EditCoverModalProps {
   subtitle?: string;
   currentImage?: string;
   poseKey?: string; // If editing a pose, lets user pick from stored photos
-  onSave: (imageUrl: string) => void;
+  onSave: (imageUrl: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -57,6 +57,26 @@ const PRESET_COVERS = [
     url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80",
   },
 ];
+
+async function compressBlobToDataUrl(blob: Blob): Promise<string> {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.src = objectUrl;
+    await image.decode();
+
+    const scale = Math.min(1, 800 / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Không thể xử lý ảnh đã chọn");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 
 export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   isOpen,
@@ -154,9 +174,16 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     }
   };
 
-  const handleSave = () => {
-    onSave(selectedImage);
-    onClose();
+  const handleSave = async () => {
+    try {
+      const imageUrl = selectedImage.startsWith("blob:")
+        ? await compressBlobToDataUrl(await fetch(selectedImage).then((response) => response.blob()))
+        : selectedImage;
+      await onSave(imageUrl);
+      onClose();
+    } catch (error) {
+      console.error("Unable to save cover image:", error);
+    }
   };
 
   return (
@@ -376,9 +403,9 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
         <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/90 flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => {
+            onClick={async () => {
               setSelectedImage("");
-              onSave("");
+              await onSave("");
               onClose();
             }}
             className="text-xs text-zinc-500 hover:text-red-500 flex items-center gap-1 font-medium transition-colors"

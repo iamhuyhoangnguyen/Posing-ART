@@ -1,4 +1,6 @@
-import React, { lazy, Suspense, useState, useEffect, useMemo } from "react";
+import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import {
   Camera,
   Search,
@@ -34,8 +36,24 @@ import { AddIdeaCard } from "./components/AddIdeaCard";
 import { InspirationBar } from "./components/InspirationBar";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
 import { exportSingleFileHtml } from "./utils/exportImport";
-import { performFullSync, syncSavedPose } from "./services/syncService";
+import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose } from "./services/syncService";
 import { motion, type Variants } from "framer-motion";
+
+type CoverSectionKey = "kyyeu" | "canhan";
+type CoverImageSyncData =
+  | { kind: "section"; sectionKey: CoverSectionKey; imageUrl: string }
+  | { kind: "category" | "pose"; sectionKey: CoverSectionKey; targetId: string; imageUrl: string };
+
+const COVER_IMAGE_RECORD_PREFIX = "cover_image:";
+
+function coverImageRecordId(data: CoverImageSyncData): string {
+  const target = "targetId" in data ? `:${encodeURIComponent(data.targetId)}` : "";
+  return `${COVER_IMAGE_RECORD_PREFIX}${data.kind}:${data.sectionKey}${target}`;
+}
+
+async function syncCoverImage(data: CoverImageSyncData): Promise<void> {
+  await syncRecord("setting", coverImageRecordId(data), data);
+}
 
 const homeCardVariants: Variants = {
   hidden: { opacity: 0, y: 36, scale: 0.98 },
@@ -54,6 +72,8 @@ const homeCardVariants: Variants = {
 export default function App() {
   // Navigation
   const [currentSection, setCurrentSection] = useState<SectionType>("home");
+  const currentSectionRef = useRef(currentSection);
+  currentSectionRef.current = currentSection;
 
   // Section Cover Photos (Home Screen Cards)
   const [kyyeuCover, setKyyeuCover] = useState<string>(() => {
@@ -201,6 +221,86 @@ export default function App() {
     localStorage.setItem("canhan-data-v1", JSON.stringify(canhanData));
   }, [canhanData]);
 
+  const applySyncedCoverImages = () => {
+    const records = getUserRecordsByType<CoverImageSyncData>("setting");
+    for (const record of records) {
+      if (!record.id.startsWith(COVER_IMAGE_RECORD_PREFIX) || record.isDeleted) continue;
+      const cover = record.data;
+      if (!cover || typeof cover.imageUrl !== "string") continue;
+
+      if (cover.kind === "section" && (cover.sectionKey === "kyyeu" || cover.sectionKey === "canhan")) {
+        localStorage.setItem(`cover-section-${cover.sectionKey}`, cover.imageUrl);
+        if (cover.sectionKey === "kyyeu") setKyyeuCover(cover.imageUrl);
+        else setCanhanCover(cover.imageUrl);
+        continue;
+      }
+
+      if ((cover.kind !== "category" && cover.kind !== "pose") ||
+        (cover.sectionKey !== "kyyeu" && cover.sectionKey !== "canhan") ||
+        typeof cover.targetId !== "string") continue;
+
+      const updateCategories = (categories: CategoryItem[]) => categories.map((category, categoryIndex) => {
+        if (cover.kind === "category") {
+          return category.id === cover.targetId ? { ...category, coverImage: cover.imageUrl } : category;
+        }
+        return {
+          ...category,
+          poses: category.poses.map((pose, poseIndex) => {
+            const poseKey = pose.id || `${cover.sectionKey}-${categoryIndex}-${poseIndex}`;
+            return poseKey === cover.targetId ? { ...pose, coverImage: cover.imageUrl } : pose;
+          }),
+        };
+      });
+
+      if (cover.sectionKey === "kyyeu") setKyyeuData(updateCategories);
+      else setCanhanData(updateCategories);
+    }
+  };
+
+  // Mirror app screens in browser history so Android back gestures can pop them.
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const historyState = event.state as { posingArtSection?: SectionType } | null;
+      setCurrentSection(historyState?.posingArtSection || "home");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (currentSection === "home") return;
+    const historyState = window.history.state as { posingArtSection?: SectionType } | null;
+    if (historyState?.posingArtSection === currentSection) return;
+    window.history.pushState({ posingArtSection: currentSection }, "", window.location.href);
+  }, [currentSection]);
+
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return;
+
+    let isMounted = true;
+    let removeListener: (() => void) | undefined;
+    void CapacitorApp.addListener("backButton", () => {
+      if (currentSectionRef.current === "home") {
+        void CapacitorApp.exitApp();
+        return;
+      }
+      window.history.back();
+    }).then((listener) => {
+      if (isMounted) {
+        removeListener = () => { void listener.remove(); };
+      } else {
+        void listener.remove();
+      }
+    }).catch((error) => {
+      console.warn("Unable to register Android back button handler:", error);
+    });
+
+    return () => {
+      isMounted = false;
+      removeListener?.();
+    };
+  }, []);
+
   // Refresh photo counts from IndexedDB
   const refreshPhotoCounts = async () => {
     try {
@@ -220,7 +320,10 @@ export default function App() {
     });
     void performFullSync();
 
-    const refreshSyncedProgress = () => setDoneVersion((version) => version + 1);
+    const refreshSyncedProgress = () => {
+      applySyncedCoverImages();
+      setDoneVersion((version) => version + 1);
+    };
     window.addEventListener("cloud_records_synced", refreshSyncedProgress);
     return () => window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
   }, []);
@@ -360,18 +463,23 @@ export default function App() {
   };
 
   // Save Cover Image Handler
-  const handleSaveCoverImage = (imageUrl: string) => {
+  const handleSaveCoverImage = async (imageUrl: string) => {
     if (!activeEditCover) return;
+
+    let syncData: CoverImageSyncData | null = null;
 
     if (activeEditCover.type === "section") {
       if (activeEditCover.sectionKey === "kyyeu") {
         setKyyeuCover(imageUrl);
         localStorage.setItem("cover-section-kyyeu", imageUrl);
+        syncData = { kind: "section", sectionKey: "kyyeu", imageUrl };
       } else if (activeEditCover.sectionKey === "canhan") {
         setCanhanCover(imageUrl);
         localStorage.setItem("cover-section-canhan", imageUrl);
+        syncData = { kind: "section", sectionKey: "canhan", imageUrl };
       }
     } else if (activeEditCover.type === "category" && activeEditCover.categoryId) {
+      const sectionKey = currentSection === "kyyeu" ? "kyyeu" : "canhan";
       const updater = currentSection === "kyyeu" ? setKyyeuData : setCanhanData;
       updater((prev) =>
         prev.map((cat) => {
@@ -381,8 +489,10 @@ export default function App() {
           return cat;
         })
       );
+      syncData = { kind: "category", sectionKey, targetId: activeEditCover.categoryId, imageUrl };
     } else if (activeEditCover.type === "pose" && activeEditCover.poseKey) {
       const targetKey = activeEditCover.poseKey;
+      const sectionKey = currentSection === "kyyeu" ? "kyyeu" : "canhan";
       const updateList = (cats: CategoryItem[]) =>
         cats.map((cat, cIdx) => ({
           ...cat,
@@ -400,6 +510,7 @@ export default function App() {
       } else {
         setCanhanData((prev) => updateList(prev));
       }
+      syncData = { kind: "pose", sectionKey, targetId: targetKey, imageUrl };
 
       // If active modal is open, also update its pose cover
       if (activePoseModal && activePoseModal.poseKey === targetKey) {
@@ -409,7 +520,22 @@ export default function App() {
       }
     }
 
+    if (syncData) await syncCoverImage(syncData);
     setActiveEditCover(null);
+  };
+
+  const returnToHome = () => {
+    if (currentSectionRef.current !== "home") {
+      const historyState = window.history.state as { posingArtSection?: SectionType } | null;
+      if (historyState?.posingArtSection) {
+        window.history.back();
+      } else {
+        setCurrentSection("home");
+      }
+    }
+    setIsCanhanDetailOpen(false);
+    setSearchQuery("");
+    setFilterStatus("all");
   };
 
   return (
@@ -437,12 +563,7 @@ export default function App() {
         }
         showBack={currentSection !== "home"}
         showProgressAndFilters={currentSection !== "canhan" && currentSection !== "kyyeu"}
-        onBackToHome={() => {
-          setCurrentSection("home");
-          setIsCanhanDetailOpen(false);
-          setSearchQuery("");
-          setFilterStatus("all");
-        }}
+        onBackToHome={returnToHome}
         completedCount={
           currentSection === "kyyeu"
             ? stats.kyyeuCompleted
@@ -789,7 +910,7 @@ export default function App() {
         {/* VIEW 2: PHẦN 3 • BẠN ĐANG BÍ Ý TƯỞNG? */}
         {currentSection === "idea-ai" && (
           <AIIdeaAssistantSection
-            onBackToHome={() => setCurrentSection("home")}
+            onBackToHome={returnToHome}
             onOpenAIAccountLogin={() => {
               setPersonalModalTab("ai");
               setShowPersonalModal(true);
