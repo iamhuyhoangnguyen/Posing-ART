@@ -222,9 +222,11 @@ export default function App() {
   }, [canhanData]);
 
   const applySyncedCoverImages = () => {
-    const records = getUserRecordsByType<CoverImageSyncData>("setting");
+    const records = getUserRecordsByType<CoverImageSyncData>("setting")
+      .filter((record) => record.id.startsWith(COVER_IMAGE_RECORD_PREFIX));
+    console.info("[Cover Sync] Applying synced cover records:", { count: records.length });
     for (const record of records) {
-      if (!record.id.startsWith(COVER_IMAGE_RECORD_PREFIX) || record.isDeleted) continue;
+      if (record.isDeleted) continue;
       const cover = record.data;
       if (!cover || typeof cover.imageUrl !== "string") continue;
 

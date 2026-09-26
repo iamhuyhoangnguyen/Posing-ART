@@ -136,6 +136,19 @@ async function performFullSyncInternal(): Promise<FullSyncResult> {
           r.userId !== userId || pushedVersions.get(r.id) !== JSON.stringify(r)
         );
         saveOfflineQueue(remainingQueue);
+      } else {
+        let serverError = "";
+        try {
+          const responseBody = await pushRes.json();
+          serverError = typeof responseBody.error === "string" ? responseBody.error : "";
+        } catch {
+          // Keep the status code as the useful diagnostic if the response is not JSON.
+        }
+        console.warn("[User Sync] Offline queue push failed:", {
+          status: pushRes.status,
+          error: serverError || pushRes.statusText,
+          recordCount: offlineQueue.length,
+        });
       }
     }
 
@@ -238,9 +251,27 @@ export async function syncRecord<T = any>(
       });
 
       if (!res.ok) {
+        let serverError = "";
+        try {
+          const responseBody = await res.json();
+          serverError = typeof responseBody.error === "string" ? responseBody.error : "";
+        } catch {
+          // Keep the status code as the useful diagnostic if the response is not JSON.
+        }
+        console.error("[User Sync] Record save rejected:", {
+          recordId,
+          type,
+          status: res.status,
+          error: serverError || res.statusText,
+        });
         enqueueOfflineRecord(record);
       }
-    } catch {
+    } catch (error) {
+      console.error("[User Sync] Record save request failed:", {
+        recordId,
+        type,
+        error: error instanceof Error ? error.message : String(error),
+      });
       enqueueOfflineRecord(record);
     }
   }

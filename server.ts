@@ -1039,14 +1039,24 @@ app.post("/api/user/sync", asyncRoute(async (req, res) => {
 
 // 3. Upsert single record
 app.post("/api/user/record", asyncRoute(async (req, res) => {
+  const requestRecord = req.body as Partial<UserCloudRecord> | undefined;
+  const recordLogContext = {
+    recordId: typeof requestRecord?.id === "string" ? requestRecord.id : "unknown",
+    type: typeof requestRecord?.type === "string" ? requestRecord.type : "unknown",
+  };
   try {
     const user = requireUser(req, res);
-    if (!user) return;
+    if (!user) {
+      console.warn("[User Record Sync] Rejected unauthenticated record request", recordLogContext);
+      return;
+    }
     const record = req.body as UserCloudRecord;
     if (!isValidUserCloudRecord(record)) {
+      console.warn("[User Record Sync] Rejected invalid or oversized record", recordLogContext);
       return res.status(400).json({ success: false, error: "Dữ liệu record không hợp lệ" });
     }
     if (record.userId && record.userId !== user.id) {
+      console.warn("[User Record Sync] Rejected record for a different user", recordLogContext);
       return res.status(403).json({ success: false, error: "Không có quyền sửa dữ liệu tài khoản khác" });
     }
     record.userId = user.id;
@@ -1065,20 +1075,34 @@ app.post("/api/user/record", asyncRoute(async (req, res) => {
       updatedAt: record.updatedAt || now,
       createdAt: record.createdAt || now,
     };
+    let operation: "inserted" | "updated" | "ignored_older" = "inserted";
 
     if (existingIdx >= 0) {
       const existing = cloudStore.records[existingIdx];
       if (itemToSave.updatedAt >= existing.updatedAt) {
         cloudStore.records[existingIdx] = itemToSave;
         await saveStore();
+        operation = "updated";
+      } else {
+        operation = "ignored_older";
       }
     } else {
       cloudStore.records.push(itemToSave);
       await saveStore();
     }
 
+    console.info("[User Record Sync] Record request completed", {
+      ...recordLogContext,
+      operation,
+      userId: user.id,
+      updatedAt: itemToSave.updatedAt,
+    });
     res.json({ success: true, record: itemToSave });
   } catch (err: any) {
+    console.error("[User Record Sync] Record request failed", {
+      ...recordLogContext,
+      error: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ success: false, error: err.message });
   }
 }));
