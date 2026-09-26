@@ -13,7 +13,11 @@ Production mặc định kết nối API tại `https://posing-art.onrender.com`
 
 ## Dữ liệu backend trên Render
 
-Máy chủ lưu dữ liệu trong `cloud_drive_store.json`. Filesystem Render mặc định là tạm thời; để giữ dữ liệu qua redeploy/restart, dùng service hỗ trợ Persistent Disk, gắn disk tại `/data`, đặt `DATA_DIR=/data`, rồi deploy lại. Chỉ dữ liệu nằm dưới mount path được giữ. Chỉ chạy một instance khi dùng file store cục bộ. Dùng `/api/health` làm health check.
+Backend dùng MongoDB Atlas. Đặt `MONGODB_URI` trong biến môi trường/Render Secret; không ghi connection string vào mã nguồn. Có thể đặt `MONGODB_DB_NAME` để chọn database riêng, nếu không tên database trong URI sẽ được dùng. Server kết nối MongoDB trước khi mở cổng và báo rõ lỗi khởi động nếu thiếu URI hoặc không kết nối được.
+
+Dữ liệu được chia thành các collection `cloud_metadata`, `cloud_users`, `cloud_photos`, `user_records`, `custom_poses` và `custom_categories`. Khi MongoDB chưa có dữ liệu, lần khởi động đầu tiên sẽ nhập `data/cloud_drive_store.json` một lần. Nếu MongoDB đã có dữ liệu, server giữ nguyên dữ liệu đó và bỏ qua import để tránh ghi đè. Trạng thái import được lưu trong MongoDB; nếu tiến trình dừng giữa chừng, lần khởi động sau sẽ tiếp tục import. File JSON không bị sửa hoặc xóa và cần được giữ lại làm bản sao lưu cho đến khi xác nhận production ổn định. `/api/health` báo trạng thái kết nối database.
+
+Backend hiện giữ bản dữ liệu đang chạy trong bộ nhớ để tương thích với các route hiện tại; hãy giữ một instance Render để tránh nhiều tiến trình ghi từ các bản cache khác nhau.
 
 ## Web và Android
 

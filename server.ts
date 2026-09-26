@@ -5,6 +5,8 @@ import path from "path";
 import fs from "fs";
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { fileURLToPath } from "url";
+import { MongoClient } from "mongodb";
+import type { Collection, Db } from "mongodb";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
 
 dotenv.config();
@@ -121,22 +123,26 @@ interface CloudDriveData {
   }>;
   customCategories: any[];
   updatedAt: number;
+  legacyMigrationComplete?: boolean;
 }
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.resolve(__dirname, "data"));
 const STORE_PATH = path.resolve(DATA_DIR, "cloud_drive_store.json");
-fs.mkdirSync(DATA_DIR, { recursive: true });
-if (process.env.NODE_ENV === "production") {
-  console.warn(
-    `[Storage] Production DATA_DIR is "${DATA_DIR}". Confirm this path is mounted on a Render Persistent Disk; local filesystem data can be erased on redeploy or restart.`,
-  );
+const MONGODB_URI = process.env.MONGODB_URI?.trim() || "";
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME?.trim() || undefined;
+
+interface CloudMongoCollections {
+  metadata: Collection<any>;
+  users: Collection<any>;
+  photos: Collection<any>;
+  records: Collection<any>;
+  customPoses: Collection<any>;
+  customCategories: Collection<any>;
 }
 
-function persistCloudStore(data: unknown): void {
-  const tempPath = `${STORE_PATH}.${process.pid}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
-  fs.renameSync(tempPath, STORE_PATH);
-}
+let mongoClient: MongoClient | undefined;
+let mongoDatabase: Db | undefined;
+let mongoCollections: CloudMongoCollections | undefined;
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME?.trim() || "";
 const rawAdminPassword = process.env.ADMIN_PASSWORD || "";
@@ -243,56 +249,73 @@ function rateLimit(maxRequests: number, windowMs: number): express.RequestHandle
   };
 }
 
+function asyncRoute(handler: express.RequestHandler): express.RequestHandler {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(next);
+  };
+}
+
 app.use("/api/auth/login", rateLimit(10, 15 * 60 * 1000));
 app.use("/api/auth/register", rateLimit(10, 60 * 60 * 1000));
 app.use("/api/auth/social", rateLimit(10, 15 * 60 * 1000));
 app.use("/api/cloud/admin/login", rateLimit(5, 15 * 60 * 1000));
 app.use("/api/ai", rateLimit(20, 60 * 60 * 1000));
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", asyncRoute(async (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const now = Date.now();
+  try {
+    await mongoDatabase?.command({ ping: 1 });
+  } catch (err) {
+    console.error("[MongoDB] Health check ping failed:", err instanceof Error ? err.message : err);
+    return res.status(503).json({
+      status: "degraded",
+      database: "disconnected",
+      timestamp: now,
+      time: new Date(now).toISOString(),
+    });
+  }
   res.json({
     status: "ok",
+    database: mongoDatabase ? "connected" : "disconnected",
     hasApiKey: Boolean(process.env.GEMINI_API_KEY),
     timestamp: now,
     time: new Date(now).toISOString(),
   });
-});
+}));
 
-function ensureStoreExists(): CloudDriveData {
-  let data: CloudDriveData | null = null;
+function createEmptyCloudStore(): CloudDriveData {
+  return {
+    adminPin: "",
+    users: [],
+    photos: [],
+    records: [],
+    customPoses: [],
+    customCategories: [],
+    updatedAt: Date.now(),
+  };
+}
+
+function readLegacyStore(): Partial<CloudDriveData> | null {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (fs.existsSync(STORE_PATH)) {
-      const content = fs.readFileSync(STORE_PATH, "utf-8");
-      data = JSON.parse(content);
-    }
+    if (!fs.existsSync(STORE_PATH)) return null;
+    return JSON.parse(fs.readFileSync(STORE_PATH, "utf-8")) as Partial<CloudDriveData>;
   } catch (err) {
-    console.error("Error reading cloud drive store:", err);
+    console.error(`[MongoDB Migration] Could not read legacy store at ${STORE_PATH}:`, err);
+    throw err;
   }
+}
 
-  if (!data) {
-    data = {
-      adminPin: "",
-      users: [],
-      photos: [],
-      records: [],
-      customPoses: [],
-      customCategories: [],
-      updatedAt: Date.now(),
-    };
-  }
-
-  if (!data.users) data.users = [];
-  if (!data.photos) data.photos = [];
-  if (!data.records) data.records = [];
-  if (!data.customPoses) data.customPoses = [];
+function normalizeCloudStore(input: Partial<CloudDriveData> | null): CloudDriveData {
+  const data: CloudDriveData = { ...createEmptyCloudStore(), ...(input || {}) };
+  data.users ||= [];
+  data.photos ||= [];
+  data.records ||= [];
+  data.customPoses ||= [];
+  data.customCategories ||= [];
 
   // Remove access tokens accidentally embedded in profile sync records by
-  // older clients before the migrated store is written back to disk.
+  // older clients before writing the data to MongoDB.
   for (const record of data.records) {
     if (record.type !== "profile" || !record.data || typeof record.data !== "object") continue;
     if (Object.prototype.hasOwnProperty.call(record.data, "token")) {
@@ -351,28 +374,215 @@ function ensureStoreExists(): CloudDriveData {
     }
   }
 
-  // Ensure default photos have status: "approved"
-  data.photos.forEach((p) => {
-    if (!p.status) p.status = "approved";
+  data.photos.forEach((photo) => {
+    if (!photo.status) photo.status = "approved";
   });
-
-  try {
-    persistCloudStore(data);
-  } catch (e) {
-    console.error("Error writing cloud drive store:", e);
-  }
   return data;
 }
 
-let cloudStore = ensureStoreExists();
+function customPoseStorageIds(poses: CloudDriveData["customPoses"]): string[] {
+  const occurrences = new Map<string, number>();
+  return poses.map((item) => {
+    const key = JSON.stringify([item.section || "", item.categoryId || "", item.pose?.id || ""]);
+    const occurrence = occurrences.get(key) || 0;
+    occurrences.set(key, occurrence + 1);
+    return `pose:${Buffer.from(key).toString("base64url")}:${occurrence}`;
+  });
+}
 
-function saveStore() {
-  try {
-    cloudStore.updatedAt = Date.now();
-    persistCloudStore(cloudStore);
-  } catch (err) {
-    console.error("Error saving cloud drive store:", err);
+async function syncMongoCollection(
+  collection: Collection<any>,
+  documents: Array<Record<string, unknown>>,
+  previousDocuments?: Array<Record<string, unknown>>,
+): Promise<void> {
+  const previousById = new Map((previousDocuments || []).map((document) => [String(document._id), document]));
+  const changedDocuments = documents.filter((document) => {
+    if (!previousDocuments) return true;
+    return JSON.stringify(previousById.get(String(document._id))) !== JSON.stringify(document);
+  });
+  if (changedDocuments.length) {
+    await collection.bulkWrite(changedDocuments.map((document) => ({
+      replaceOne: {
+        filter: { _id: document._id },
+        replacement: document,
+        upsert: true,
+      },
+    })), { ordered: false });
   }
+  if (previousDocuments) {
+    const currentIds = new Set(documents.map((document) => String(document._id)));
+    const deletedIds = previousDocuments
+      .filter((document) => !currentIds.has(String(document._id)))
+      .map((document) => document._id);
+    if (deletedIds.length) await collection.deleteMany({ _id: { $in: deletedIds } });
+  }
+}
+
+async function persistMongoStore(data: CloudDriveData, previousData?: CloudDriveData): Promise<void> {
+  if (!mongoCollections) throw new Error("MongoDB storage is not initialized.");
+  const currentPoseIds = customPoseStorageIds(data.customPoses);
+  const previousPoseIds = previousData ? customPoseStorageIds(previousData.customPoses) : [];
+  const toUserDocuments = (items: StoredUser[]) => items.map((user) => ({
+    ...user,
+    _id: user.id,
+    usernameKey: user.username.toLowerCase(),
+  }));
+  const toPhotoDocuments = (items: CloudPhotoItem[]) => items.map((photo) => ({ ...photo, _id: photo.id }));
+  const toRecordDocuments = (items: UserCloudRecord[]) => items.map((record) => ({
+    ...record,
+    _id: `${record.userId}:${record.id}`,
+  }));
+  const toPoseDocuments = (items: CloudDriveData["customPoses"], ids: string[]) => items.map((item, index) => ({
+    ...item,
+    _id: ids[index],
+  }));
+  const toCategoryDocuments = (items: any[]) => items.map((category, index) => ({
+    _id: String(category?.id || `category:${index}`),
+    data: category,
+  }));
+  await Promise.all([
+    syncMongoCollection(mongoCollections.users, toUserDocuments(data.users), previousData && toUserDocuments(previousData.users)),
+    syncMongoCollection(mongoCollections.photos, toPhotoDocuments(data.photos), previousData && toPhotoDocuments(previousData.photos)),
+    syncMongoCollection(mongoCollections.records, toRecordDocuments(data.records), previousData && toRecordDocuments(previousData.records)),
+    syncMongoCollection(
+      mongoCollections.customPoses,
+      toPoseDocuments(data.customPoses, currentPoseIds),
+      previousData && toPoseDocuments(previousData.customPoses, previousPoseIds),
+    ),
+    syncMongoCollection(
+      mongoCollections.customCategories,
+      toCategoryDocuments(data.customCategories),
+      previousData && toCategoryDocuments(previousData.customCategories),
+    ),
+    mongoCollections.metadata.replaceOne(
+      { _id: "primary" },
+      {
+        _id: "primary",
+        adminPin: data.adminPin,
+        adminPinEnvFingerprint: data.adminPinEnvFingerprint,
+        updatedAt: data.updatedAt,
+        legacyMigrationComplete: data.legacyMigrationComplete === true,
+      },
+      { upsert: true },
+    ),
+  ]);
+}
+
+async function loadMongoStore(): Promise<CloudDriveData> {
+  if (!mongoCollections) throw new Error("MongoDB storage is not initialized.");
+  const [metadata, users, photos, records, customPoses, customCategories] = await Promise.all([
+    mongoCollections.metadata.findOne({ _id: "primary" }),
+    mongoCollections.users.find({}).toArray(),
+    mongoCollections.photos.find({}).toArray(),
+    mongoCollections.records.find({}).toArray(),
+    mongoCollections.customPoses.find({}).toArray(),
+    mongoCollections.customCategories.find({}).toArray(),
+  ]);
+  const removeStorageFields = (document: Record<string, any>) => {
+    const { _id, usernameKey: _usernameKey, ...item } = document;
+    return item;
+  };
+  return {
+    ...createEmptyCloudStore(),
+    adminPin: String(metadata?.adminPin || ""),
+    adminPinEnvFingerprint: metadata?.adminPinEnvFingerprint as string | undefined,
+    updatedAt: Number(metadata?.updatedAt) || Date.now(),
+    legacyMigrationComplete: metadata?.legacyMigrationComplete === true,
+    users: users.map((document) => removeStorageFields(document) as unknown as StoredUser),
+    photos: photos.map((document) => removeStorageFields(document) as unknown as CloudPhotoItem),
+    records: records.map((document) => removeStorageFields(document) as unknown as UserCloudRecord),
+    customPoses: customPoses.map((document) => removeStorageFields(document) as CloudDriveData["customPoses"][number]),
+    customCategories: customCategories.map((document) => document.data),
+  };
+}
+
+async function initializeMongoStore(): Promise<CloudDriveData> {
+  if (!MONGODB_URI) {
+    throw new Error("MONGODB_URI is missing. Configure it in the server environment before startup.");
+  }
+  mongoClient = new MongoClient(MONGODB_URI, {
+    appName: "Posing-ART",
+    serverSelectionTimeoutMS: 10_000,
+  });
+  await mongoClient.connect();
+  const database = MONGODB_DB_NAME ? mongoClient.db(MONGODB_DB_NAME) : mongoClient.db();
+  mongoDatabase = database;
+  mongoCollections = {
+    metadata: database.collection("cloud_metadata"),
+    users: database.collection("cloud_users"),
+    photos: database.collection("cloud_photos"),
+    records: database.collection("user_records"),
+    customPoses: database.collection("custom_poses"),
+    customCategories: database.collection("custom_categories"),
+  };
+  await Promise.all([
+    mongoCollections.users.createIndex({ usernameKey: 1 }, { unique: true }),
+    mongoCollections.photos.createIndex({ ownerUserId: 1, localPhotoId: 1 }),
+    mongoCollections.records.createIndex({ userId: 1, updatedAt: 1 }),
+    mongoCollections.customPoses.createIndex({ section: 1, categoryId: 1 }),
+    mongoCollections.customCategories.createIndex({ _id: 1 }),
+  ]);
+  console.info(`[MongoDB] Connected to database "${database.databaseName}".`);
+
+  const [metadata, migration] = await Promise.all([
+    mongoCollections.metadata.findOne({ _id: "primary" }),
+    mongoCollections.metadata.findOne({ _id: "legacy-migration" }),
+  ]);
+  const collectionCounts = await Promise.all([
+    mongoCollections.users.countDocuments(),
+    mongoCollections.photos.countDocuments(),
+    mongoCollections.records.countDocuments(),
+    mongoCollections.customPoses.countDocuments(),
+    mongoCollections.customCategories.countDocuments(),
+  ]);
+  const isDatabaseEmpty = collectionCounts.every((count) => count === 0);
+  let initialData: Partial<CloudDriveData> | null = null;
+  const resumeMigration = migration?.state === "importing";
+  if (metadata?.legacyMigrationComplete !== true && (isDatabaseEmpty || resumeMigration)) {
+    initialData = readLegacyStore();
+    if (initialData) {
+      await mongoCollections.metadata.replaceOne(
+        { _id: "legacy-migration" },
+        { _id: "legacy-migration", state: "importing", startedAt: migration?.startedAt || Date.now() },
+        { upsert: true },
+      );
+      console.info("[MongoDB Migration] Importing legacy JSON data into MongoDB.");
+    }
+  } else if (metadata?.legacyMigrationComplete !== true && !isDatabaseEmpty) {
+    console.warn("[MongoDB Migration] MongoDB already contains data; preserving it and skipping JSON import.");
+  }
+
+  const loaded = await loadMongoStore();
+  const normalized = normalizeCloudStore(initialData || loaded);
+  normalized.legacyMigrationComplete = true;
+  await persistMongoStore(normalized);
+  lastPersistedStore = structuredClone(normalized);
+  await mongoCollections.metadata.replaceOne(
+    { _id: "legacy-migration" },
+    { _id: "legacy-migration", state: "complete", completedAt: Date.now() },
+    { upsert: true },
+  );
+  if (initialData) {
+    console.info("[MongoDB Migration] JSON import completed. The legacy JSON file was kept as a backup.");
+  }
+  return normalized;
+}
+
+let cloudStore: CloudDriveData;
+let saveQueue: Promise<void> = Promise.resolve();
+let lastPersistedStore: CloudDriveData | undefined;
+
+function saveStore(): Promise<void> {
+  cloudStore.updatedAt = Date.now();
+  const snapshot = structuredClone(cloudStore);
+  const saveOperation = saveQueue.then(async () => {
+    await persistMongoStore(snapshot, lastPersistedStore);
+    lastPersistedStore = structuredClone(snapshot);
+  });
+  saveQueue = saveOperation.catch((err) => {
+    console.error("[MongoDB] Failed to persist cloud data:", err);
+  });
+  return saveOperation;
 }
 
 // ==========================================
@@ -414,7 +624,7 @@ app.post("/api/auth/login", (req, res) => {
 });
 
 // Register sub-account: NO Gmail or external account needed
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", asyncRoute(async (req, res) => {
   try {
     const { username, password, name } = req.body;
     const cleanUser = String(username || "").trim();
@@ -450,7 +660,7 @@ app.post("/api/auth/register", (req, res) => {
     };
 
     cloudStore.users.push(newUser);
-    saveStore();
+    await saveStore();
 
     const token = createAuthToken(newUser);
     const { passwordHash, ...safeUser } = newUser;
@@ -462,7 +672,7 @@ app.post("/api/auth/register", (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+}));
 
 // Social login is disabled until an OAuth provider can verify the user identity.
 app.post("/api/auth/social", (req, res) => {
@@ -501,7 +711,7 @@ app.get("/api/cloud/sync", (_req, res) => {
 
 // 3. Upload Photo to Cloud Drive
 // Sub-accounts uploads are tagged as "pending" for admin approval
-app.post("/api/cloud/upload-photo", (req, res) => {
+app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
@@ -537,13 +747,13 @@ app.post("/api/cloud/upload-photo", (req, res) => {
     };
 
     cloudStore.photos.unshift(newPhoto);
-    saveStore();
+    await saveStore();
 
     res.json({ success: true, photo: newPhoto });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Lỗi lưu ảnh lên Cloud Drive" });
   }
-});
+}));
 
 // 3B. Get Pending Photos for Admin Approval
 app.get("/api/cloud/photos/pending", (req, res) => {
@@ -553,7 +763,7 @@ app.get("/api/cloud/photos/pending", (req, res) => {
 });
 
 // 3C. Approve Photo (ADMIN ONLY)
-app.post("/api/cloud/photo/:id/approve", (req, res) => {
+app.post("/api/cloud/photo/:id/approve", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { id } = req.params;
   const photo = cloudStore.photos.find((p) => p.id === id);
@@ -561,12 +771,12 @@ app.post("/api/cloud/photo/:id/approve", (req, res) => {
     return res.status(404).json({ error: "Không tìm thấy ảnh" });
   }
   photo.status = "approved";
-  saveStore();
+  await saveStore();
   res.json({ success: true, photo });
-});
+}));
 
 // 3D. Approve All Pending Photos (ADMIN ONLY)
-app.post("/api/cloud/photos/approve-all", (req, res) => {
+app.post("/api/cloud/photos/approve-all", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   let approvedCount = 0;
   cloudStore.photos.forEach((p) => {
@@ -575,12 +785,12 @@ app.post("/api/cloud/photos/approve-all", (req, res) => {
       approvedCount++;
     }
   });
-  if (approvedCount > 0) saveStore();
+  if (approvedCount > 0) await saveStore();
   res.json({ success: true, approvedCount });
-});
+}));
 
 // 4. Add Custom Pose to Cloud Drive (ALLOWED FOR EVERYONE)
-app.post("/api/cloud/add-pose", (req, res) => {
+app.post("/api/cloud/add-pose", asyncRoute(async (req, res) => {
   try {
     if (!requireUser(req, res)) return;
     const { section, categoryId, pose } = req.body;
@@ -589,13 +799,13 @@ app.post("/api/cloud/add-pose", (req, res) => {
     }
 
     cloudStore.customPoses.unshift({ section, categoryId, pose });
-    saveStore();
+    await saveStore();
 
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 // 5. Admin Login Verification
 app.post("/api/cloud/admin/login", (req, res) => {
@@ -614,37 +824,37 @@ app.post("/api/cloud/admin/login", (req, res) => {
 });
 
 // 6. Change Admin PIN (REQUIRES ADMIN)
-app.post("/api/cloud/admin/change-pin", (req, res) => {
+app.post("/api/cloud/admin/change-pin", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { newPin } = req.body;
   if (typeof newPin !== "string" || newPin.trim().length < 12) {
     return res.status(400).json({ error: "Mã PIN mới phải từ 12 ký tự trở lên" });
   }
   cloudStore.adminPin = hashPassword(newPin.trim());
-  saveStore();
+  await saveStore();
   res.json({ success: true, message: "Đã cập nhật mã PIN Admin thành công" });
-});
+}));
 
 // 7. Delete Photo from Cloud Drive (STRICTLY REQUIRES ADMIN)
-app.delete("/api/cloud/photo/:id", (req, res) => {
+app.delete("/api/cloud/photo/:id", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { id } = req.params;
   const initialLen = cloudStore.photos.length;
   cloudStore.photos = cloudStore.photos.filter((p) => p.id !== id);
   if (cloudStore.photos.length !== initialLen) {
-    saveStore();
+    await saveStore();
   }
   res.json({ success: true });
-});
+}));
 
 // 8. Delete Custom Pose from Cloud Drive (STRICTLY REQUIRES ADMIN)
-app.delete("/api/cloud/pose/:id", (req, res) => {
+app.delete("/api/cloud/pose/:id", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const { id } = req.params;
   cloudStore.customPoses = cloudStore.customPoses.filter((cp) => cp.pose.id !== id);
-  saveStore();
+  await saveStore();
   res.json({ success: true });
-});
+}));
 
 // ==========================================
 // CENTRALIZED VERSION & MULTI-PLATFORM UPDATE
@@ -724,7 +934,7 @@ app.get("/api/user/sync", (req, res) => {
 });
 
 // 2. Push & merge user cloud records with Last-Write-Wins conflict resolution
-app.post("/api/user/sync", (req, res) => {
+app.post("/api/user/sync", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
@@ -778,7 +988,7 @@ app.post("/api/user/sync", (req, res) => {
     }
 
     if (updatedCount > 0) {
-      saveStore();
+      await saveStore();
     }
 
     res.json({
@@ -790,10 +1000,10 @@ app.post("/api/user/sync", (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+}));
 
 // 3. Upsert single record
-app.post("/api/user/record", (req, res) => {
+app.post("/api/user/record", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
@@ -825,21 +1035,21 @@ app.post("/api/user/record", (req, res) => {
       const existing = cloudStore.records[existingIdx];
       if (itemToSave.updatedAt >= existing.updatedAt) {
         cloudStore.records[existingIdx] = itemToSave;
-        saveStore();
+        await saveStore();
       }
     } else {
       cloudStore.records.push(itemToSave);
-      saveStore();
+      await saveStore();
     }
 
     res.json({ success: true, record: itemToSave });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+}));
 
 // 4. Delete user record
-app.delete("/api/user/record/:id", (req, res) => {
+app.delete("/api/user/record/:id", asyncRoute(async (req, res) => {
   try {
     const user = requireUser(req, res);
     if (!user) return;
@@ -859,14 +1069,14 @@ app.delete("/api/user/record/:id", (req, res) => {
     );
 
     if (cloudStore.records.length !== initialLen) {
-      saveStore();
+      await saveStore();
     }
 
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+}));
 
 // 5. User dataset summary (counts for Web and Android)
 app.get("/api/user/summary", (req, res) => {
@@ -1170,6 +1380,8 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
 
 // Configure Vite in dev mode or static files in production
 async function startServer() {
+  cloudStore = await initializeMongoStore();
+
   if (process.env.NODE_ENV !== "production") {
     const { createServer } = await import("vite");
     const vite = await createServer({
@@ -1189,4 +1401,21 @@ async function startServer() {
   });
 }
 
-startServer();
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[Server] Request failed:", err);
+  if (res.headersSent) return;
+  res.status(500).json({ success: false, error: "Lỗi máy chủ khi xử lý yêu cầu" });
+});
+
+startServer().catch(async (err) => {
+  console.error(
+    "[Startup] Server could not start because MongoDB initialization failed:",
+    err instanceof Error ? err.message : err,
+  );
+  try {
+    await mongoClient?.close();
+  } catch (closeError) {
+    console.error("[MongoDB] Failed to close after startup error:", closeError);
+  }
+  process.exitCode = 1;
+});
