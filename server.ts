@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
 import { fileURLToPath } from "url";
 import { MongoClient } from "mongodb";
 import type { Collection, Db } from "mongodb";
@@ -803,6 +805,166 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
   if (!photo) return res.status(404).json({ success: false, error: "Không tìm thấy ảnh" });
   res.json({ success: true, photo: { id: photo.id, dataUrl: photo.dataUrl } });
 });
+
+const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com"];
+const MAX_INSPIRATION_HTML_BYTES = 2_000_000;
+
+function isPublicInternetAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) {
+    const octets = address.split(".").map(Number);
+    const [a, b, c] = octets;
+    return !(
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && (b === 0 || b === 168)) ||
+      (a === 192 && b === 0 && c === 2) ||
+      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+      (a === 203 && b === 0 && c === 113)
+    );
+  }
+  if (version === 6) {
+    const normalized = address.toLowerCase();
+    return !(
+      normalized === "::" || normalized === "::1" ||
+      normalized.startsWith("::ffff:") || normalized.startsWith("2002:") || normalized.startsWith("2001:0:") ||
+      normalized.startsWith("fc") || normalized.startsWith("fd") ||
+      /^fe[89ab]/.test(normalized) || normalized.startsWith("ff") ||
+      normalized.startsWith("2001:db8:") || normalized.startsWith("2001:10:")
+    );
+  }
+  return false;
+}
+
+async function validateInspirationPageUrl(value: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw Object.assign(new Error("Liên kết không hợp lệ."), { statusCode: 400 });
+  }
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  const normalizedIp = hostname.replace(/^\[|\]$/g, "");
+  const isIpLiteral = isIP(normalizedIp) !== 0;
+  const isLocalHostname = hostname === "localhost" || hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") || hostname.endsWith(".internal");
+  const allowedHost = INSPIRATION_PAGE_HOSTS.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  if (isIpLiteral || isLocalHostname) {
+    throw Object.assign(new Error("Không chấp nhận địa chỉ IP nội bộ, localhost hoặc host riêng."), { statusCode: 400 });
+  }
+  if (url.protocol !== "https:" || (url.port && url.port !== "443") || url.username || url.password || !allowedHost) {
+    throw Object.assign(new Error("Chỉ hỗ trợ liên kết HTTPS từ Pinterest hoặc RedNote."), { statusCode: 400 });
+  }
+  let resolvedAddresses: Array<{ address: string; family: number }>;
+  try {
+    resolvedAddresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch {
+    throw Object.assign(new Error("Không thể xác minh địa chỉ máy chủ của liên kết này."), { statusCode: 400 });
+  }
+  if (!resolvedAddresses.length || resolvedAddresses.some(({ address }) => !isPublicInternetAddress(address))) {
+    throw Object.assign(new Error("Liên kết trỏ tới địa chỉ IP nội bộ hoặc không an toàn."), { statusCode: 400 });
+  }
+  return url;
+}
+
+function decodeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function findOpenGraphImage(html: string): string | null {
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const attributes = new Map<string, string>();
+    for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) {
+      attributes.set(match[1].toLowerCase(), match[2] ?? match[3] ?? match[4] ?? "");
+    }
+    const key = (attributes.get("property") || attributes.get("name") || "").toLowerCase();
+    if (key === "og:image" || key === "og:image:secure_url") {
+      const content = attributes.get("content");
+      if (content) return decodeHtmlAttribute(content.trim());
+    }
+  }
+  return null;
+}
+
+async function getInspirationOgImage(value: string): Promise<{ imageUrl: string; pageUrl: string }> {
+  let pageUrl = await validateInspirationPageUrl(value);
+  for (let redirectCount = 0; redirectCount <= 4; redirectCount++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await fetch(pageUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": "PosingART-LinkPreview/1.0",
+        },
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        if (!location || redirectCount === 4) throw new Error("Liên kết chuyển hướng quá nhiều lần.");
+        pageUrl = await validateInspirationPageUrl(new URL(location, pageUrl).toString());
+        continue;
+      }
+      if (!response.ok) throw new Error(`Không tải được trang (${response.status}).`);
+      if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        throw new Error("Liên kết này không trỏ tới trang Pinterest hoặc RedNote.");
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Không đọc được nội dung trang.");
+      const decoder = new TextDecoder();
+      let html = "";
+      let byteLength = 0;
+      while (true) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+        byteLength += chunk.byteLength;
+        if (byteLength > MAX_INSPIRATION_HTML_BYTES) {
+          await reader.cancel();
+          throw new Error("Trang nguồn quá lớn để xử lý.");
+        }
+        html += decoder.decode(chunk, { stream: true });
+      }
+      html += decoder.decode();
+
+      const rawImageUrl = findOpenGraphImage(html);
+      if (!rawImageUrl) throw new Error("Trang này không cung cấp ảnh xem trước (og:image).");
+      const imageUrl = new URL(rawImageUrl, pageUrl);
+      if (imageUrl.protocol !== "https:" || imageUrl.username || imageUrl.password) {
+        throw new Error("Địa chỉ ảnh xem trước không an toàn.");
+      }
+      return { imageUrl: imageUrl.toString(), pageUrl: pageUrl.toString() };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  throw new Error("Không thể theo liên kết chuyển hướng.");
+}
+
+app.post("/api/inspiration/og-image", asyncRoute(async (req, res) => {
+  const url = req.body?.url;
+  if (typeof url !== "string" || !url.trim() || url.length > 2_048) {
+    return res.status(400).json({ success: false, error: "Vui lòng nhập một liên kết Pinterest hoặc RedNote hợp lệ." });
+  }
+  try {
+    const result = await getInspirationOgImage(url.trim());
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 502).json({
+      success: false,
+      error: error?.message || "Không thể lấy ảnh xem trước từ liên kết này.",
+    });
+  }
+}));
 
 // 3. Upload Photo to Cloud Drive; every authenticated account's photo is immediately shared.
 app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {

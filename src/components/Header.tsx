@@ -169,9 +169,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onToggleDarkMode}
             title={darkMode ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}
-            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
+            aria-label={darkMode ? "Chuyển giao diện sáng" : "Chuyển giao diện tối"}
+            aria-pressed={darkMode}
+            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors inline-flex items-center gap-1.5"
           >
             {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+            <span className="text-[10px] font-semibold">{darkMode ? "Sáng" : "Tối"}</span>
           </button>
 
           {handlePersonalClick && (

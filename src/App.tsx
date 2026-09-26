@@ -203,14 +203,32 @@ export default function App() {
 
   // Apply dark class
   useEffect(() => {
+    const root = document.documentElement;
     if (darkMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
+      root.classList.add("dark");
     } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
+      root.classList.remove("dark");
     }
+    root.style.colorScheme = darkMode ? "dark" : "light";
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", darkMode ? "#09090b" : "#faf9f6");
   }, [darkMode]);
+
+  useEffect(() => {
+    const preference = window.matchMedia("(prefers-color-scheme: dark)");
+    const followSystemPreference = (event: MediaQueryListEvent) => {
+      if (localStorage.getItem("theme") === null) setDarkMode(event.matches);
+    };
+    preference.addEventListener("change", followSystemPreference);
+    return () => preference.removeEventListener("change", followSystemPreference);
+  }, []);
+
+  const handleToggleDarkMode = () => {
+    setDarkMode((current) => {
+      const next = !current;
+      localStorage.setItem("theme", next ? "dark" : "light");
+      return next;
+    });
+  };
 
   // Persist categories
   useEffect(() => {
@@ -589,11 +607,43 @@ export default function App() {
         onOpenPersonal={() => setShowPersonalModal(true)}
         onResetSession={handleResetSession}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode((current) => !current)}
+        onToggleDarkMode={handleToggleDarkMode}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-5 pb-24">
+        {(currentSection === "kyyeu" || currentSection === "canhan") && (
+          <div className="mb-4 space-y-3">
+            {(currentSection === "kyyeu" || isCanhanDetailOpen) && (
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={`Tìm dáng, góc máy hoặc mẹo ${currentSection === "kyyeu" ? "kỷ yếu" : "concept"}...`}
+                  className="w-full pl-10 pr-12 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 outline-none focus:border-amber-500 shadow-sm transition-all"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    Xóa
+                  </button>
+                )}
+              </div>
+            )}
+            {currentCategory && (currentSection === "kyyeu" || isCanhanDetailOpen) && (
+              <InspirationBar
+                categoryId={currentCategory.id}
+                categoryLabel={currentCategory.label}
+              />
+            )}
+          </div>
+        )}
+
         {/* VIEW 1: HOME */}
         {currentSection === "home" && (
           <div className="space-y-4 sm:space-y-5">
@@ -1040,8 +1090,8 @@ export default function App() {
                 </div>
               </div>
             ) : currentSection === "kyyeu" ? (
-              /* PHẦN 1 (KỶ YẾU): CATEGORY TABS */
-              <div className="flex flex-col gap-2 pb-1 py-1">
+              /* PHẦN 1 (KỶ YẾU): CATEGORY CARDS, MATCHING PHẦN 2 */
+              <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                 {kyyeuData.map((cat, idx) => {
                   const isActive = idx === activeKyyeuCatIdx;
                   const catCompleted = cat.poses.filter((p, pIdx) => {
@@ -1052,29 +1102,56 @@ export default function App() {
                   return (
                     <button
                       key={cat.id || idx}
+                      type="button"
                       onClick={() => {
                         setActiveKyyeuCatIdx(idx);
+                        setSearchQuery("");
                         setFilterStatus("all");
                       }}
-                      className={`w-full px-4 py-3 rounded-2xl text-xs font-bold transition-all flex items-center justify-between gap-3 active:scale-[0.99] ${
+                      className={`group relative w-full h-28 rounded-2xl overflow-hidden text-left transition-all duration-200 border cursor-pointer active:scale-[0.99] ${
                         isActive
-                          ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 shadow-sm"
-                          : "bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300"
+                          ? "border-2 border-amber-500 ring-2 ring-amber-500/30 shadow-md scale-[1.01]"
+                          : "border-zinc-200 dark:border-zinc-800 opacity-90 hover:opacity-100 hover:shadow-xs"
                       }`}
                     >
-                      <span>{cat.label}</span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${
-                          isActive
-                            ? "bg-white/20 text-white dark:bg-black/20 dark:text-black"
-                            : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500"
-                        }`}
-                      >
-                        {catCompleted}/{cat.poses.length}
-                      </span>
+                      <img
+                        src={cat.coverImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80"}
+                        alt={cat.label}
+                        loading="lazy"
+                        className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                      <div className={`absolute inset-0 transition-colors ${isActive ? "bg-gradient-to-t from-black/95 via-black/45 to-amber-950/20" : "bg-gradient-to-t from-black/90 via-black/50 to-transparent"}`} />
+                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md text-[10px] font-bold text-white border border-white/15">
+                        {catCompleted}/{cat.poses.length} dáng
+                      </div>
+                      {isActive && (
+                        <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </div>
+                      )}
+                      <div className="absolute bottom-2 left-2.5 right-2 text-white">
+                        <div className={`text-xs sm:text-sm font-extrabold leading-tight ${isActive ? "text-amber-300" : "text-white"}`}>
+                          {cat.label}
+                        </div>
+                        {cat.description && (
+                          <div className="text-[10px] text-zinc-300 line-clamp-1 mt-0.5 opacity-90">
+                            {cat.description}
+                          </div>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={() => setCustomModalConfig({ isOpen: true, mode: "category" })}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white/60 dark:bg-zinc-900/60 p-3 transition-all text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400"
+                >
+                  <span className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                    <Plus className="w-4 h-4 text-amber-500" />
+                  </span>
+                  <span className="text-xs font-bold">Thêm danh mục Kỷ Yếu</span>
+                </button>
               </div>
             ) : null}
 
@@ -1095,29 +1172,6 @@ export default function App() {
                 </h2>
               </div>
             )}
-
-            {/* RỒI MỚI SANG MỤC ẢNH */}
-            {/* Real-time search box */}
-            {(currentSection === "kyyeu" || !isCanhanDetailOpen) && <div className="relative">
-              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={`Tìm kiếm tên dáng, góc máy hoặc mẹo ${
-                  currentSection === "kyyeu" ? "kỷ yếu..." : "concept cá nhân..."
-                }`}
-                className="w-full pl-10 pr-4 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 outline-none focus:border-amber-500 shadow-sm transition-all"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-zinc-600"
-                >
-                  Xóa
-                </button>
-              )}
-            </div>}
 
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
             {currentSection === "kyyeu" && currentCategory && !searchQuery && (
@@ -1164,14 +1218,6 @@ export default function App() {
                   )}
                 </div>
               </div>
-            )}
-
-            {/* Pinterest & Rednote Exploration Bar for Current Category */}
-            {currentCategory && (currentSection === "kyyeu" || isCanhanDetailOpen) && (
-              <InspirationBar
-                categoryId={currentCategory.id}
-                categoryLabel={currentCategory.label}
-              />
             )}
 
             {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
@@ -1392,7 +1438,7 @@ export default function App() {
           setShowSettingsModal(false);
         }}
         darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode((current) => !current)}
+        onToggleDarkMode={handleToggleDarkMode}
         totalPoses={stats.totalPoses}
         doneCount={stats.totalCompleted}
         totalPhotos={stats.totalPhotos}

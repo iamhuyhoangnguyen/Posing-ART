@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { getPhotosForPose } from "../utils/db";
 import { PhotoRecord } from "../types";
+import { serverUrl } from "../services/apiUrl";
 
 interface EditCoverModalProps {
   isOpen: boolean;
@@ -91,6 +92,8 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   const [inputUrl, setInputUrl] = useState("");
   const [savedPhotos, setSavedPhotos] = useState<string[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [resolvingInspiration, setResolvingInspiration] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -167,10 +170,45 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     }
   };
 
-  const handleApplyUrl = () => {
-    if (inputUrl.trim()) {
-      setSelectedImage(inputUrl.trim());
+  const handleApplyUrl = async () => {
+    const value = inputUrl.trim();
+    if (!value) return;
+    setLinkError(null);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(value);
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") throw new Error();
+    } catch {
+      setLinkError("Vui lòng nhập một URL http hoặc https hợp lệ.");
+      return;
+    }
+
+    const host = parsedUrl.hostname.toLowerCase();
+    const supportedInspirationLink = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com"]
+      .some((domain) => host === domain || host.endsWith(`.${domain}`));
+    if (!supportedInspirationLink) {
+      setSelectedImage(parsedUrl.toString());
       setInputUrl("");
+      return;
+    }
+
+    setResolvingInspiration(true);
+    try {
+      const response = await fetch(serverUrl("/api/inspiration/og-image"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: parsedUrl.toString() }),
+      });
+      const result = await response.json();
+      if (!response.ok || typeof result.imageUrl !== "string") {
+        throw new Error(result.error || "Không lấy được ảnh từ liên kết này.");
+      }
+      setSelectedImage(result.imageUrl);
+      setInputUrl("");
+    } catch (error) {
+      setLinkError(error instanceof Error ? error.message : "Không lấy được ảnh từ liên kết này.");
+    } finally {
+      setResolvingInspiration(false);
     }
   };
 
@@ -337,8 +375,11 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
           {/* Action 3: Enter Image URL */}
           <div className="space-y-1.5 pt-1">
             <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
-              Hoặc dán liên kết ảnh (URL)
+              Dán URL ảnh hoặc liên kết Pinterest / RedNote
             </span>
+            <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+              Với link bài/pin, app lấy ảnh xem trước từ og:image.
+            </p>
             <div className="flex gap-1.5">
               <div className="relative flex-1">
                 <LinkIcon className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -346,19 +387,26 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                   type="text"
                   value={inputUrl}
                   onChange={(e) => setInputUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full pl-8 pr-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs outline-none focus:border-amber-500"
+                  placeholder="https://www.pinterest.com/pin/..."
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleApplyUrl();
+                    }
+                  }}
+                  className="w-full pl-8 pr-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs text-zinc-900 dark:text-zinc-100 outline-none focus:border-amber-500"
                 />
               </div>
               <button
                 type="button"
-                onClick={handleApplyUrl}
-                disabled={!inputUrl.trim()}
+                onClick={() => void handleApplyUrl()}
+                disabled={!inputUrl.trim() || resolvingInspiration}
                 className="px-3 py-2 rounded-xl bg-zinc-800 dark:bg-zinc-700 disabled:opacity-40 text-white font-bold text-xs"
               >
-                Áp dụng
+                {resolvingInspiration ? "Đang lấy..." : "Dùng ảnh"}
               </button>
             </div>
+            {linkError && <p role="alert" className="text-[11px] text-rose-600 dark:text-rose-400">{linkError}</p>}
           </div>
 
           {/* Action 4: Preset Curated Lookbook Covers */}
@@ -376,7 +424,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                   className={`group relative rounded-xl overflow-hidden aspect-square border-2 transition-all ${
                     selectedImage === preset.url
                       ? "border-amber-500 ring-2 ring-amber-500/30 scale-[0.98]"
-                      : "border-zinc-200 dark:border-zinc-750 opacity-80 hover:opacity-100"
+                      : "border-zinc-200 dark:border-zinc-700 opacity-80 hover:opacity-100"
                   }`}
                   title={preset.label}
                 >
