@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { MongoClient } from "mongodb";
 import type { Collection, Db } from "mongodb";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
+import { APP_RELEASE_DATE, APP_VERSION, CURRENT_RELEASE_NOTES } from "./src/version";
 
 dotenv.config();
 
@@ -806,9 +807,10 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
   res.json({ success: true, photo: { id: photo.id, dataUrl: photo.dataUrl } });
 });
 
-const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com"];
+const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com", "rednote.com"];
 const MAX_INSPIRATION_HTML_BYTES = 2_000_000;
 const MAX_INSPIRATION_IMAGE_BYTES = 10 * 1024 * 1024;
+const INSPIRATION_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 
 function isPublicInternetAddress(address: string): boolean {
   const version = isIP(address);
@@ -988,7 +990,15 @@ async function downloadInspirationImage(value: string): Promise<string> {
       const response = await fetch(imageUrl, {
         redirect: "manual",
         signal: controller.signal,
-        headers: { Accept: "image/jpeg,image/png,image/webp,image/gif", "User-Agent": "PosingART-CoverImage/1.0" },
+        headers: {
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+          "User-Agent": "Mozilla/5.0 (compatible; PosingART-CoverImage/1.0)",
+          ...(imageUrl.hostname === "xhscdn.com" || imageUrl.hostname.endsWith(".xhscdn.com") || imageUrl.hostname === "xiaohongshu.com" || imageUrl.hostname.endsWith(".xiaohongshu.com")
+            ? { Referer: "https://www.xiaohongshu.com/" }
+            : imageUrl.hostname === "pinimg.com" || imageUrl.hostname.endsWith(".pinimg.com") || imageUrl.hostname === "pinterest.com" || imageUrl.hostname.endsWith(".pinterest.com")
+              ? { Referer: "https://www.pinterest.com/" }
+              : {}),
+        },
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
@@ -996,10 +1006,15 @@ async function downloadInspirationImage(value: string): Promise<string> {
         imageUrl = await validatePublicInspirationImageUrl(new URL(location, imageUrl).toString());
         continue;
       }
-      if (!response.ok) throw new Error(`Không tải được ảnh nguồn (${response.status}).`);
-      const mimeType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
-      if (!mimeType || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mimeType)) {
-        throw new Error("Nguồn không trả về định dạng ảnh được hỗ trợ.");
+      if (!response.ok) {
+        if (response.status === 403 || response.status === 401) {
+          throw new Error(`CDN từ chối tải ảnh (HTTP ${response.status}). Link có thể hết hạn hoặc yêu cầu quyền truy cập.`);
+        }
+        throw new Error(`Máy chủ ảnh trả về lỗi HTTP ${response.status}.`);
+      }
+      const responseMimeType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+      if (responseMimeType && !responseMimeType.startsWith("image/") && responseMimeType !== "application/octet-stream") {
+        throw new Error(`Máy chủ trả về ${responseMimeType} thay vì dữ liệu ảnh.`);
       }
       const contentLength = Number(response.headers.get("content-length"));
       if (Number.isFinite(contentLength) && contentLength > MAX_INSPIRATION_IMAGE_BYTES) {
@@ -1025,6 +1040,17 @@ async function downloadInspirationImage(value: string): Promise<string> {
       for (const chunk of chunks) {
         bytes.set(chunk, offset);
         offset += chunk.byteLength;
+      }
+      const signature = Buffer.from(bytes.subarray(0, 16));
+      let detectedMimeType: string | null = null;
+      if (signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff) detectedMimeType = "image/jpeg";
+      else if (signature.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) detectedMimeType = "image/png";
+      else if (signature.toString("ascii", 0, 4) === "GIF8") detectedMimeType = "image/gif";
+      else if (signature.toString("ascii", 0, 4) === "RIFF" && signature.toString("ascii", 8, 12) === "WEBP") detectedMimeType = "image/webp";
+      else if (signature.toString("ascii", 4, 8) === "ftyp" && /^(avif|avis)$/.test(signature.toString("ascii", 8, 12))) detectedMimeType = "image/avif";
+      const mimeType = detectedMimeType || responseMimeType;
+      if (!mimeType || !INSPIRATION_IMAGE_MIME_TYPES.has(mimeType)) {
+        throw new Error(`Ảnh có định dạng không được hỗ trợ${responseMimeType ? ` (${responseMimeType})` : ""}. Hãy chọn ảnh JPEG, PNG, WebP, GIF hoặc AVIF.`);
       }
       return `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
     } finally {
@@ -1059,6 +1085,9 @@ app.post("/api/inspiration/download-image", asyncRoute(async (req, res) => {
     const dataUrl = await downloadInspirationImage(imageUrl.trim());
     return res.json({ success: true, dataUrl });
   } catch (error: any) {
+    let sourceHost = "invalid-url";
+    try { sourceHost = new URL(imageUrl.trim()).hostname; } catch { /* Keep the safe fallback host label. */ }
+    console.warn("[inspiration-image-download]", JSON.stringify({ host: sourceHost, error: error?.message || "unknown error" }));
     return res.status(502).json({
       success: false,
       error: error?.message || "Không thể tải ảnh xem trước. Hãy thử ảnh khác hoặc tải ảnh lên từ thiết bị.",
@@ -1192,7 +1221,6 @@ app.delete("/api/cloud/pose/:id", asyncRoute(async (req, res) => {
 // ==========================================
 // CENTRALIZED VERSION & MULTI-PLATFORM UPDATE
 // ==========================================
-const CURRENT_APP_VERSION = "2.3.0";
 const MINIMUM_SUPPORTED_VERSION = "1.0.0";
 const ANDROID_DOWNLOAD_URL = (process.env.ANDROID_DOWNLOAD_URL || "").trim();
 
@@ -1200,30 +1228,22 @@ app.get("/api/version", (req, res) => {
   const clientVer = (req.query.clientVersion as string) || "1.0.0";
   const platform = (req.query.platform as string) || "web";
 
-  const isClientOutdated = clientVer !== CURRENT_APP_VERSION;
+  const isClientOutdated = clientVer !== APP_VERSION;
 
   res.json({
-    currentVersion: CURRENT_APP_VERSION,
+    currentVersion: APP_VERSION,
     minimumVersion: MINIMUM_SUPPORTED_VERSION,
-    releaseDate: "2026-09-26",
-    releaseNotes: [
-      "Phiên bản 2.3 cải thiện điều hướng danh mục, ảnh bìa và giao diện.",
-      "Hỗ trợ xem trước ảnh từ Pinterest/RedNote, dán ảnh clipboard và chọn giao diện Theo hệ thống.",
-      "Thêm chip tìm nhanh dáng đứng, dáng ngồi, concept vintage và thông báo cập nhật Web/PWA.",
-      "Hệ thống Cơ sở Dữ liệu Đám Mây đồng nhất: Favorites, Saved Poses, Collections, Concepts và AI Ideas.",
-      "Cơ chế giải quyết xung đột Last-Write-Wins bảo đảm toàn vẹn dữ liệu giữa nhiều thiết bị.",
-      "Tối ưu hóa bộ nhớ đệm Cache ngoại tuyến khi mất kết nối mạng.",
-      "Hỗ trợ cập nhật bản Android và làm mới ứng dụng Web/PWA.",
-    ],
+    releaseDate: APP_RELEASE_DATE,
+    releaseNotes: CURRENT_RELEASE_NOTES,
     android: {
       updateAvailable: platform === "android" && isClientOutdated && Boolean(ANDROID_DOWNLOAD_URL),
-      version: CURRENT_APP_VERSION,
+      version: APP_VERSION,
       downloadUrl: ANDROID_DOWNLOAD_URL,
       instructions: "Tải file POSING_ART.apk, mở file và chọn Cài đặt (Cho phép cài đặt từ nguồn tin cậy nếu có yêu cầu).",
     },
     web: {
       updateAvailable: platform === "web" && isClientOutdated,
-      version: CURRENT_APP_VERSION,
+      version: APP_VERSION,
     },
   });
 });

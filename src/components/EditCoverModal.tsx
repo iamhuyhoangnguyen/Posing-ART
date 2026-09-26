@@ -13,6 +13,7 @@ import {
 import { getPhotosForPose } from "../utils/db";
 import { PhotoRecord } from "../types";
 import { serverUrl } from "../services/apiUrl";
+import { createCroppedImageDataUrl, ImageCropEditor, ImageCropPosition } from "./ImageCropEditor";
 
 interface EditCoverModalProps {
   isOpen: boolean;
@@ -59,26 +60,6 @@ const PRESET_COVERS = [
   },
 ];
 
-async function compressBlobToDataUrl(blob: Blob): Promise<string> {
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const image = new Image();
-    image.src = objectUrl;
-    await image.decode();
-
-    const scale = Math.min(1, 800 / Math.max(image.width, image.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.width * scale));
-    canvas.height = Math.max(1, Math.round(image.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Không thể xử lý ảnh đã chọn");
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.85);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
 export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   isOpen,
   title,
@@ -96,7 +77,9 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkPreviewUrl, setLinkPreviewUrl] = useState<string | null>(null);
   const [selectedInspirationImageUrl, setSelectedInspirationImageUrl] = useState<string | null>(null);
+  const [downloadingInspiration, setDownloadingInspiration] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [cropPosition, setCropPosition] = useState<ImageCropPosition>({ zoom: 1, x: 0, y: 0 });
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +92,10 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     setClipboardNotice(null);
     setLinkError(null);
   }, [currentImage, isOpen]);
+
+  useEffect(() => {
+    setCropPosition({ zoom: 1, x: 0, y: 0 });
+  }, [selectedImage]);
 
   // Load existing photos from IndexedDB if editing a pose
   useEffect(() => {
@@ -134,39 +121,12 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Compress image before saving to Base64 (to fit easily into localStorage)
+  // Keep the source image intact until the user confirms the crop.
   const processImageFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 800;
-        const MAX_HEIGHT = 800;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-          setSelectedImage(dataUrl);
-        }
-      };
-      img.src = e.target?.result as string;
+      const dataUrl = e.target?.result;
+      if (typeof dataUrl === "string") setSelectedImage(dataUrl);
     };
     reader.readAsDataURL(file);
   };
@@ -176,6 +136,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     if (files && files[0]) {
       setClipboardNotice(null);
       setLinkPreviewUrl(null);
+      setSelectedInspirationImageUrl(null);
       processImageFile(files[0]);
     }
   };
@@ -190,6 +151,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     event.preventDefault();
     setLinkError(null);
     setLinkPreviewUrl(null);
+    setSelectedInspirationImageUrl(null);
     setClipboardNotice("Đã nhận ảnh từ clipboard. Kiểm tra ảnh xem trước rồi lưu.");
     processImageFile(imageFile);
   };
@@ -199,6 +161,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     if (!value) return;
     setLinkError(null);
     setLinkPreviewUrl(null);
+    setSelectedInspirationImageUrl(null);
     setClipboardNotice(null);
     let parsedUrl: URL;
     try {
@@ -210,12 +173,32 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     }
 
     const host = parsedUrl.hostname.toLowerCase();
-    const supportedInspirationLink = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com"]
+    const supportedInspirationLink = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com", "rednote.com"]
       .some((domain) => host === domain || host.endsWith(`.${domain}`));
     if (!supportedInspirationLink) {
-      setSelectedImage(parsedUrl.toString());
-      setLinkPreviewUrl(null);
-      setInputUrl("");
+      setResolvingInspiration(true);
+      try {
+        const response = await fetch(serverUrl("/api/inspiration/download-image"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageUrl: parsedUrl.toString() }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || typeof result.dataUrl !== "string") {
+          throw new Error(result.error || `Máy chủ không tải được ảnh (${response.status}).`);
+        }
+        setSelectedImage(result.dataUrl);
+        setLinkPreviewUrl(null);
+        setSelectedInspirationImageUrl(null);
+        setInputUrl("");
+        setClipboardNotice("Đã tải ảnh về. Căn chỉnh khung crop rồi nhấn Lưu để áp dụng.");
+      } catch (error) {
+        setLinkError(error instanceof Error
+          ? `Không tải được ảnh từ URL đã nhập: ${error.message}`
+          : "Không tải được ảnh từ URL đã nhập. Hãy dùng link HTTPS hoặc chọn ảnh khác.");
+      } finally {
+        setResolvingInspiration(false);
+      }
       return;
     }
 
@@ -240,31 +223,60 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
     }
   };
 
+  const handleSelectInspirationImage = async () => {
+    if (!linkPreviewUrl || downloadingInspiration) return;
+    setDownloadingInspiration(true);
+    setLinkError(null);
+    try {
+      const response = await fetch(serverUrl("/api/inspiration/download-image"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: linkPreviewUrl }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || typeof result.dataUrl !== "string") {
+        throw new Error(result.error || `Máy chủ không tải được ảnh (${response.status}). Hãy thử lại hoặc chọn ảnh khác.`);
+      }
+      setSelectedImage(result.dataUrl);
+      setSelectedInspirationImageUrl(linkPreviewUrl);
+      setClipboardNotice("Đã tải ảnh về. Căn chỉnh khung crop rồi nhấn Lưu để áp dụng.");
+    } catch (error) {
+      console.error("Unable to download inspiration cover image:", error);
+      setLinkError(error instanceof Error
+        ? `Không tải được ảnh từ Pinterest/RedNote: ${error.message}`
+        : "Không tải được ảnh từ Pinterest/RedNote. Ảnh chưa được lưu; hãy thử lại hoặc chọn ảnh khác.");
+    } finally {
+      setDownloadingInspiration(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!selectedImage || savingImage) return;
     setSavingImage(true);
     setLinkError(null);
     try {
       let imageUrl = selectedImage;
-      if (selectedInspirationImageUrl && selectedImage === selectedInspirationImageUrl) {
+      if (/^https?:\/\//i.test(selectedImage)) {
         const response = await fetch(serverUrl("/api/inspiration/download-image"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageUrl: selectedInspirationImageUrl }),
+          body: JSON.stringify({ imageUrl: selectedImage }),
         });
-        const result = await response.json();
+        const result = await response.json().catch(() => ({}));
         if (!response.ok || typeof result.dataUrl !== "string") {
-          throw new Error(result.error || "Không tải được ảnh từ nguồn. Ảnh chưa được lưu.");
+          throw new Error(result.error || `Máy chủ không tải được ảnh (${response.status}). Ảnh chưa được lưu; hãy thử lại hoặc chọn ảnh khác.`);
         }
-        imageUrl = await compressBlobToDataUrl(await fetch(result.dataUrl).then((imageResponse) => imageResponse.blob()));
-      } else if (selectedImage.startsWith("blob:")) {
-        imageUrl = await compressBlobToDataUrl(await fetch(selectedImage).then((response) => response.blob()));
+        imageUrl = await createCroppedImageDataUrl(result.dataUrl, cropPosition);
+      } else {
+        imageUrl = await createCroppedImageDataUrl(selectedImage, cropPosition);
       }
       await onSave(imageUrl);
       onClose();
     } catch (error) {
       console.error("Unable to save cover image:", error);
-      setLinkError(error instanceof Error ? error.message : "Không thể tải và lưu ảnh. Vui lòng thử lại.");
+      setLinkError(error instanceof Error
+        ? `Không thể tải/cắt ảnh: ${error.message}`
+        : "Không thể tải hoặc cắt ảnh. Ảnh chưa được lưu; vui lòng thử lại hoặc chọn ảnh khác.");
     } finally {
       setSavingImage(false);
     }
@@ -351,6 +363,13 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
             </div>
           </div>
 
+          {selectedImage && (
+            <section className="space-y-2 rounded-2xl border border-amber-200/80 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/10 p-3">
+              <h4 className="text-[11px] font-bold text-zinc-700 dark:text-zinc-200">Căn chỉnh vùng ảnh bìa (16:9)</h4>
+              <ImageCropEditor src={selectedImage} position={cropPosition} onPositionChange={setCropPosition} />
+            </section>
+          )}
+
           {/* Action 1: Upload from device or take photo */}
           <div className="grid grid-cols-2 gap-2">
             <input
@@ -402,7 +421,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => { setSelectedImage(url); setLinkPreviewUrl(null); setClipboardNotice(null); }}
+                    onClick={() => { setSelectedImage(url); setSelectedInspirationImageUrl(null); setLinkPreviewUrl(null); setClipboardNotice(null); }}
                     className={`relative flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${
                       selectedImage === url
                         ? "border-amber-500 ring-2 ring-amber-500/30"
@@ -467,15 +486,11 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                   <p className="text-[10px] font-semibold text-zinc-700 dark:text-zinc-200">Ảnh xem trước từ Pinterest / RedNote</p>
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedImage(linkPreviewUrl);
-                      setSelectedInspirationImageUrl(linkPreviewUrl);
-                      setLinkError(null);
-                      setClipboardNotice("Đã chọn ảnh xem trước. Nhấn Lưu để áp dụng.");
-                    }}
+                    onClick={() => void handleSelectInspirationImage()}
+                    disabled={downloadingInspiration}
                     className="mt-1 text-[10px] font-bold text-amber-700 underline underline-offset-2 dark:text-amber-300"
                   >
-                  {selectedImage === linkPreviewUrl ? "Đã chọn · sẽ tải ảnh về khi lưu" : "Dùng ảnh này"}
+                  {downloadingInspiration ? "Đang tải ảnh về..." : selectedInspirationImageUrl === linkPreviewUrl ? "Đã tải và chọn ảnh" : "Dùng ảnh này"}
                   </button>
                 </div>
               </div>
@@ -494,7 +509,7 @@ export const EditCoverModal: React.FC<EditCoverModalProps> = ({
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => { setSelectedImage(preset.url); setLinkPreviewUrl(null); setClipboardNotice(null); }}
+                  onClick={() => { setSelectedImage(preset.url); setSelectedInspirationImageUrl(null); setLinkPreviewUrl(null); setClipboardNotice(null); }}
                   className={`group relative rounded-xl overflow-hidden aspect-square border-2 transition-all ${
                     selectedImage === preset.url
                       ? "border-amber-500 ring-2 ring-amber-500/30 scale-[0.98]"

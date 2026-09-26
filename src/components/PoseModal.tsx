@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   X,
   CheckCircle2,
@@ -50,7 +50,8 @@ export const PoseModal: React.FC<PoseModalProps> = ({
 }) => {
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
+  const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState<number | null>(null);
+  const lightboxTouchStartX = useRef<number | null>(null);
   const [copiedQuery, setCopiedQuery] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(getCurrentUser());
   const [pasteToast, setPasteToast] = useState<string | null>(null);
@@ -68,6 +69,17 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   useEffect(() => {
     setCurrentUser(getCurrentUser());
   }, []);
+
+  useEffect(() => {
+    if (lightboxPhotoIndex === null) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowRight" && photosWithUrls.length > 1) setLightboxPhotoIndex((index) => index === null ? null : (index + 1) % photosWithUrls.length);
+      if (event.key === "ArrowLeft" && photosWithUrls.length > 1) setLightboxPhotoIndex((index) => index === null ? null : (index - 1 + photosWithUrls.length) % photosWithUrls.length);
+      if (event.key === "Escape") setLightboxPhotoIndex(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [lightboxPhotoIndex, photosWithUrls.length]);
 
   useEffect(() => {
     if (poseKey) {
@@ -412,12 +424,12 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                 <span className="text-[9px] text-zinc-400">Chọn nhiều ảnh</span>
               </button>
 
-              {photosWithUrls.map(({ photo: p, url: imgUrl }) => {
+              {photosWithUrls.map(({ photo: p, url: imgUrl }, photoIndex) => {
                 const isSelected = selectedPhotoIds.has(p.id);
                 return (
                   <div
                     key={p.id}
-                    onClick={() => selectionMode ? toggleSelectedPhoto(p.id) : setLightboxPhoto(imgUrl)}
+                    onClick={() => selectionMode ? toggleSelectedPhoto(p.id) : setLightboxPhotoIndex(photoIndex)}
                     className={`group relative aspect-square rounded-2xl bg-zinc-100 dark:bg-zinc-800 cursor-pointer shadow-sm border border-zinc-200/50 dark:border-zinc-700/50 ${openPhotoMenuId === p.id ? "z-30" : "z-0"}`}
                   >
                     <img
@@ -502,20 +514,50 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       </div>
 
       {/* Lightbox Modal */}
-      {lightboxPhoto && (
+      {lightboxPhotoIndex !== null && photosWithUrls[lightboxPhotoIndex] && (
         <div
           className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4 animate-fadeIn"
-          onClick={() => setLightboxPhoto(null)}
+          onClick={() => setLightboxPhotoIndex(null)}
+          onTouchStart={(event) => { lightboxTouchStartX.current = event.changedTouches[0]?.clientX ?? null; }}
+          onTouchEnd={(event) => {
+            const startX = lightboxTouchStartX.current;
+            lightboxTouchStartX.current = null;
+            const endX = event.changedTouches[0]?.clientX;
+            if (startX === null || endX === undefined || Math.abs(endX - startX) < 45 || photosWithUrls.length < 2) return;
+            setLightboxPhotoIndex((index) => index === null ? null : endX < startX
+              ? (index + 1) % photosWithUrls.length
+              : (index - 1 + photosWithUrls.length) % photosWithUrls.length);
+          }}
         >
           <button
-            onClick={() => setLightboxPhoto(null)}
+            onClick={(event) => { event.stopPropagation(); setLightboxPhotoIndex(null); }}
             className="absolute top-4 right-4 p-3 rounded-full bg-zinc-800/80 text-white hover:bg-zinc-700"
           >
             <X className="w-6 h-6" />
           </button>
 
+          {photosWithUrls.length > 1 && (
+            <>
+              <button
+                type="button"
+                aria-label="Ảnh trước"
+                onClick={(event) => { event.stopPropagation(); setLightboxPhotoIndex((lightboxPhotoIndex - 1 + photosWithUrls.length) % photosWithUrls.length); }}
+                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 px-4 py-3 text-white hover:bg-zinc-700"
+              >‹</button>
+              <button
+                type="button"
+                aria-label="Ảnh tiếp theo"
+                onClick={(event) => { event.stopPropagation(); setLightboxPhotoIndex((lightboxPhotoIndex + 1) % photosWithUrls.length); }}
+                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 px-4 py-3 text-white hover:bg-zinc-700"
+              >›</button>
+              <span className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-semibold text-white">
+                {lightboxPhotoIndex + 1} / {photosWithUrls.length}
+              </span>
+            </>
+          )}
+
           <img
-            src={lightboxPhoto}
+            src={photosWithUrls[lightboxPhotoIndex].url}
             alt="Phóng to"
             className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
             onClick={(e) => e.stopPropagation()}

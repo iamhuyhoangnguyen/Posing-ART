@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.3.2";
-export const APP_BUILD_NUMBER = 232;
+export const APP_VERSION = "2.4.0";
+export const APP_BUILD_NUMBER = 240;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 2.4: căn chỉnh vùng ảnh bìa trước khi lưu, lướt ảnh tham khảo bằng thao tác vuốt và cải thiện tải ảnh RedNote.",
   "Phiên bản 2.3.2: ảnh bìa từ Pinterest/RedNote được tải và lưu trong app thay vì hotlink.",
   "Phiên bản 2.3.1: đổi giao diện sáng/tối/theo hệ thống bằng một nút bấm.",
   "Phiên bản 2.3: điều hướng danh mục, chỉnh ảnh bìa và trải nghiệm giao diện được cải thiện.",
