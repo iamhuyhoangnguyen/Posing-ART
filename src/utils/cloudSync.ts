@@ -1,9 +1,10 @@
 // Client-side Cloud Drive Sync manager
 // Coordinates synchronization between local IndexedDB and server-backed Cloud Drive
-import { getAllPhotos, addPhoto, openDatabase, updatePhotoCloudState } from "./db";
+import { getAllPhotos, addPhoto, openDatabase, updatePhotoCloudState, deletePhotosForPoses } from "./db";
 import { getAdminToken } from "./adminAuth";
 import { getCurrentUser, refreshCurrentUserSession } from "./userAuth";
 import { serverUrl } from "../services/apiUrl";
+import { purgeLocalRecordsForTopic } from "../services/syncService";
 
 export interface CloudPhotoItem {
   id: string;
@@ -22,6 +23,7 @@ export interface CloudSyncResponse {
   photos: CloudPhotoItem[];
   customPoses: any[];
   customCategories: any[];
+  deletedCategories?: Array<{ section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] }>;
   updatedAt: number;
 }
 
@@ -195,10 +197,7 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
   let connected = false;
 
   try {
-    // Retry local photos first. Each upload uses a stable client ID for safe retries.
-    uploaded = await syncPendingLocalPhotos();
-
-    // Fetch cloud data after uploads so this device sees its newly shared photos.
+    // Read topic tombstones before uploading so pending photos from a deleted topic cannot be recreated.
     const res = await fetch(serverUrl("/api/cloud/sync?metadataOnly=true"));
     if (!res.ok) {
       return { connected: false, downloaded: 0, uploaded, totalCloudPhotos: 0 };
@@ -207,6 +206,23 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
 
     const cloudData: CloudSyncResponse = await res.json();
     totalCloudPhotos = cloudData.photos?.length || 0;
+
+    const deletedCategories = cloudData.deletedCategories || [];
+    try {
+      localStorage.setItem("posing_deleted_categories", JSON.stringify(deletedCategories));
+    } catch (error) {
+      console.warn("Could not cache deleted topic metadata:", error);
+    }
+    const deletedPoseKeys = [...new Set(deletedCategories.flatMap((category) => category.poseKeys || []))];
+    if (deletedPoseKeys.length) await deletePhotosForPoses(deletedPoseKeys);
+    for (const category of deletedCategories) {
+      purgeLocalRecordsForTopic(category.section, category.categoryId, category.poseKeys || []);
+    }
+    for (const poseKey of deletedPoseKeys) localStorage.removeItem(`done-${poseKey}`);
+    window.dispatchEvent(new CustomEvent("cloud_categories_synced", { detail: { deletedCategories } }));
+
+    // Retry remaining local photos with stable IDs so retries cannot create duplicate cloud photos.
+    uploaded = await syncPendingLocalPhotos();
 
     // 2. Get local photos
     const localPhotos = await getAllPhotos();

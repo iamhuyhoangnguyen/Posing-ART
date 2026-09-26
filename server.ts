@@ -130,6 +130,7 @@ interface CloudDriveData {
     pose: any;
   }>;
   customCategories: any[];
+  deletedCategories: Array<{ section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] }>;
   updatedAt: number;
   legacyMigrationComplete?: boolean;
 }
@@ -357,6 +358,7 @@ function createEmptyCloudStore(): CloudDriveData {
     records: [],
     customPoses: [],
     customCategories: [],
+    deletedCategories: [],
     updatedAt: Date.now(),
   };
 }
@@ -378,6 +380,7 @@ function normalizeCloudStore(input: Partial<CloudDriveData> | null): CloudDriveD
   data.records ||= [];
   data.customPoses ||= [];
   data.customCategories ||= [];
+  data.deletedCategories ||= [];
 
   // Remove access tokens accidentally embedded in profile sync records by
   // older clients before writing the data to MongoDB.
@@ -528,6 +531,7 @@ async function persistMongoStore(data: CloudDriveData, previousData?: CloudDrive
         adminPinEnvFingerprint: data.adminPinEnvFingerprint,
         updatedAt: data.updatedAt,
         legacyMigrationComplete: data.legacyMigrationComplete === true,
+        deletedCategories: data.deletedCategories,
       },
       { upsert: true },
     ),
@@ -554,6 +558,7 @@ async function loadMongoStore(): Promise<CloudDriveData> {
     adminPinEnvFingerprint: metadata?.adminPinEnvFingerprint as string | undefined,
     updatedAt: Number(metadata?.updatedAt) || Date.now(),
     legacyMigrationComplete: metadata?.legacyMigrationComplete === true,
+    deletedCategories: Array.isArray(metadata?.deletedCategories) ? metadata.deletedCategories : [],
     users: users.map((document) => removeStorageFields(document) as unknown as StoredUser),
     photos: photos.map((document) => removeStorageFields(document) as unknown as CloudPhotoItem),
     records: records.map((document) => removeStorageFields(document) as unknown as UserCloudRecord),
@@ -796,6 +801,7 @@ app.get("/api/cloud/sync", (_req, res) => {
     photos,
     customPoses: cloudStore.customPoses,
     customCategories: cloudStore.customCategories,
+    deletedCategories: cloudStore.deletedCategories,
     updatedAt: cloudStore.updatedAt,
   });
 });
@@ -1195,6 +1201,82 @@ app.post("/api/cloud/admin/change-pin", asyncRoute(async (req, res) => {
   cloudStore.adminPin = hashPassword(newPin.trim());
   await saveStore();
   res.json({ success: true, message: "Đã cập nhật mã PIN Admin thành công" });
+}));
+
+function getTopicDeleteRequest(body: any): { section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] } | null {
+  if (!body || !["kyyeu", "canhan"].includes(body.section)) return null;
+  if (typeof body.categoryId !== "string" || !body.categoryId.trim() || body.categoryId.length > 256) return null;
+  if (!Array.isArray(body.poseKeys) || body.poseKeys.length > 500 ||
+    body.poseKeys.some((key: unknown) => typeof key !== "string" || key.length > 256)) return null;
+  return { section: body.section, categoryId: body.categoryId, poseKeys: [...new Set(body.poseKeys as string[])] };
+}
+
+function isTopicOwnedRecord(
+  record: UserCloudRecord,
+  section: "kyyeu" | "canhan",
+  categoryId: string,
+  poseKeys: Set<string>,
+): boolean {
+  const data = record.data || {};
+  if ((record.type === "savedPose" || record.type === "favorite") && poseKeys.has(data.poseKey)) return true;
+  if (record.type === "setting" && data.sectionKey === section && (
+    (data.kind === "category" && data.targetId === categoryId) ||
+    (data.kind === "pose" && poseKeys.has(data.targetId))
+  )) return true;
+  return (record.type === "collection" || record.type === "personalConcept") &&
+    (record.id === `collection_${categoryId}` || record.id === `concept_${categoryId}` ||
+      data.id === categoryId || data.categoryId === categoryId);
+}
+
+app.post("/api/cloud/category/preview-delete", asyncRoute(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const topic = getTopicDeleteRequest(req.body);
+  if (!topic) return res.status(400).json({ success: false, error: "Thông tin chủ đề cần xóa không hợp lệ" });
+  const poseKeys = new Set(topic.poseKeys);
+  const customPoseCount = cloudStore.customPoses.filter((item) =>
+    (item.section === topic.section && item.categoryId === topic.categoryId) || poseKeys.has(item.pose?.id)
+  ).length;
+  const relatedRecordCount = cloudStore.records.filter((record) =>
+    isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
+  ).length;
+  res.json({
+    success: true,
+    categoryFound: cloudStore.customCategories.some((category) => category?.id === topic.categoryId),
+    photoCount: cloudStore.photos.filter((photo) => poseKeys.has(photo.poseKey)).length,
+    customPoseCount,
+    relatedRecordCount,
+  });
+}));
+
+app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const topic = getTopicDeleteRequest({ ...req.body, categoryId: req.params.id });
+  if (!topic) return res.status(400).json({ success: false, error: "Thông tin chủ đề cần xóa không hợp lệ" });
+
+  const poseKeys = new Set(topic.poseKeys);
+  const removed = {
+    photos: cloudStore.photos.filter((photo) => poseKeys.has(photo.poseKey)).length,
+    customPoses: cloudStore.customPoses.filter((item) =>
+      (item.section === topic.section && item.categoryId === topic.categoryId) || poseKeys.has(item.pose?.id)
+    ).length,
+    records: cloudStore.records.filter((record) =>
+      isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
+    ).length,
+  };
+  cloudStore.photos = cloudStore.photos.filter((photo) => !poseKeys.has(photo.poseKey));
+  cloudStore.customPoses = cloudStore.customPoses.filter((item) =>
+    !((item.section === topic.section && item.categoryId === topic.categoryId) || poseKeys.has(item.pose?.id))
+  );
+  cloudStore.customCategories = cloudStore.customCategories.filter((category) => category?.id !== topic.categoryId);
+  cloudStore.records = cloudStore.records.filter((record) =>
+    !isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
+  );
+  const priorDeletion = cloudStore.deletedCategories.find((item) => item.section === topic.section && item.categoryId === topic.categoryId);
+  if (priorDeletion) priorDeletion.poseKeys = [...new Set([...priorDeletion.poseKeys, ...topic.poseKeys])];
+  else cloudStore.deletedCategories.push({ ...topic, poseKeys: [...poseKeys] });
+
+  await saveStore();
+  res.json({ success: true, removed });
 }));
 
 // 7. Delete Photo from Cloud Drive (STRICTLY REQUIRES ADMIN)

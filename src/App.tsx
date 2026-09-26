@@ -24,12 +24,13 @@ import {
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
-import { getPhotoCounts } from "./utils/db";
+import { getPhotoCounts, deletePhotosForPoses } from "./utils/db";
 import { Header } from "./components/Header";
 import { PoseCard } from "./components/PoseCard";
 import { CategoryImageCard } from "./components/CategoryImageCard";
 import { OfflineImage } from "./components/OfflineImage";
 import type { ReferenceSheetPose } from "./components/ReferenceSheetModal";
+import type { LibraryPoseEntry } from "./components/HomeLibraryTools";
 const PoseModal = lazy(() => import("./components/PoseModal").then((module) => ({ default: module.PoseModal })));
 const AIPoseAdvisorModal = lazy(() => import("./components/AIPoseAdvisorModal").then((module) => ({ default: module.AIPoseAdvisorModal })));
 const BackupModal = lazy(() => import("./components/BackupModal").then((module) => ({ default: module.BackupModal })));
@@ -38,11 +39,15 @@ const EditCoverModal = lazy(() => import("./components/EditCoverModal").then((mo
 const InstallGuideModal = lazy(() => import("./components/InstallGuideModal").then((module) => ({ default: module.InstallGuideModal })));
 const PersonalModal = lazy(() => import("./components/PersonalModal").then((module) => ({ default: module.PersonalModal })));
 const ReferenceSheetModal = lazy(() => import("./components/ReferenceSheetModal").then((module) => ({ default: module.ReferenceSheetModal })));
+const CategoryDeleteConfirmModal = lazy(() => import("./components/CategoryDeleteConfirmModal").then((module) => ({ default: module.CategoryDeleteConfirmModal })));
+const HomeLibraryTools = lazy(() => import("./components/HomeLibraryTools").then((module) => ({ default: module.HomeLibraryTools })));
 import { AddIdeaCard } from "./components/AddIdeaCard";
 import { InspirationBar } from "./components/InspirationBar";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
 import { exportSingleFileHtml } from "./utils/exportImport";
-import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose } from "./services/syncService";
+import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
+import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, type CategoryDeletionPreview } from "./services/categoryAdminService";
+import { isCurrentUserAdmin } from "./utils/userAuth";
 import { motion, type Variants } from "framer-motion";
 
 type CoverSectionKey = "kyyeu" | "canhan";
@@ -51,6 +56,38 @@ type CoverImageSyncData =
   | { kind: "category" | "pose"; sectionKey: CoverSectionKey; targetId: string; imageUrl: string };
 
 const COVER_IMAGE_RECORD_PREFIX = "cover_image:";
+const RECENT_VIEW_KEY = "posing_recent_pose_views_v1";
+
+interface RecentPoseView {
+  poseKey: string;
+  viewedAt: number;
+}
+
+interface CategoryDeleteCandidate {
+  section: "kyyeu" | "canhan";
+  category: CategoryItem;
+  categoryIndex: number;
+  poseKeys: string[];
+  preview: CategoryDeletionPreview;
+  localPhotoCount: number;
+}
+
+function filterDeletedCategories(section: "kyyeu" | "canhan", categories: CategoryItem[]): CategoryItem[] {
+  const deleted = getDeletedCategoryKeys();
+  return categories.filter((category) => !deleted.has(`${section}:${category.id}`));
+}
+
+function readRecentPoseViews(): RecentPoseView[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_VIEW_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is RecentPoseView =>
+      typeof item?.poseKey === "string" && Number.isFinite(item?.viewedAt)
+    ).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
 
 function coverImageRecordId(data: CoverImageSyncData): string {
   const target = "targetId" in data ? `:${encodeURIComponent(data.targetId)}` : "";
@@ -106,24 +143,24 @@ export default function App() {
         const filtered = parsed.filter(
           (c) => c.id !== "kyyeu-nam" && !c.label.toLowerCase().includes("đơn nam")
         );
-        return filtered.length > 0 ? filtered : INITIAL_DATA_KYYEU;
+        return filterDeletedCategories("kyyeu", filtered);
       } catch (e) {
         console.error(e);
       }
     }
-    return INITIAL_DATA_KYYEU;
+    return filterDeletedCategories("kyyeu", INITIAL_DATA_KYYEU);
   });
 
   const [canhanData, setCanhanData] = useState<CategoryItem[]>(() => {
     const saved = localStorage.getItem("canhan-data-v1");
     if (saved) {
       try {
-        return JSON.parse(saved);
+        return filterDeletedCategories("canhan", JSON.parse(saved));
       } catch (e) {
         console.error(e);
       }
     }
-    return INITIAL_DATA_CANHAN;
+    return filterDeletedCategories("canhan", INITIAL_DATA_CANHAN);
   });
 
   // Active category index within section
@@ -136,6 +173,7 @@ export default function App() {
 
   // Search query & filter status
   const [searchQuery, setSearchQuery] = useState("");
+  const [recentPoseViews, setRecentPoseViews] = useState<RecentPoseView[]>(readRecentPoseViews);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
 
   // Photo counts map from IndexedDB
@@ -158,6 +196,9 @@ export default function App() {
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showReferenceSheet, setShowReferenceSheet] = useState(false);
+  const [categoryDeleteCandidate, setCategoryDeleteCandidate] = useState<CategoryDeleteCandidate | null>(null);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
+  const [categoryDeleteError, setCategoryDeleteError] = useState("");
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState<{
@@ -383,8 +424,26 @@ export default function App() {
       applySyncedCoverImages();
       setDoneVersion((version) => version + 1);
     };
+    const removeDeletedCategories = () => {
+      const deleted = getDeletedCategoryKeys();
+      setKyyeuData((categories) => categories.filter((category) => !deleted.has(`kyyeu:${category.id}`)));
+      setCanhanData((categories) => categories.filter((category) => !deleted.has(`canhan:${category.id}`)));
+      const removedPoseKeys = new Set(
+        (JSON.parse(localStorage.getItem("posing_deleted_categories") || "[]") as Array<{ poseKeys?: string[] }>)
+          .flatMap((category) => category.poseKeys || [])
+      );
+      const updatedViews = readRecentPoseViews().filter((item) => !removedPoseKeys.has(item.poseKey));
+      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
+      setRecentPoseViews(updatedViews);
+      setReferenceSheetPoses((selected) => selected.filter((item) => !removedPoseKeys.has(item.key)));
+      setDoneVersion((version) => version + 1);
+    };
     window.addEventListener("cloud_records_synced", refreshSyncedProgress);
-    return () => window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
+    window.addEventListener("cloud_categories_synced", removeDeletedCategories);
+    return () => {
+      window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
+      window.removeEventListener("cloud_categories_synced", removeDeletedCategories);
+    };
   }, []);
 
   // Stats calculation
@@ -430,6 +489,50 @@ export default function App() {
   const currentCategories = currentSection === "kyyeu" ? kyyeuData : canhanData;
   const currentCatIdx = currentSection === "kyyeu" ? activeKyyeuCatIdx : activeCanhanCatIdx;
   const currentCategory = currentCategories[currentCatIdx] || currentCategories[0];
+
+  const libraryPoses = useMemo<LibraryPoseEntry[]>(() => [
+    ...kyyeuData.flatMap((category, categoryIndex) => category.poses.map((pose, poseIndex) => ({
+      pose,
+      section: "kyyeu" as const,
+      category,
+      categoryIndex,
+      poseKey: pose.id || `kyyeu-${categoryIndex}-${poseIndex}`,
+    }))),
+    ...canhanData.flatMap((category, categoryIndex) => category.poses.map((pose, poseIndex) => ({
+      pose,
+      section: "canhan" as const,
+      category,
+      categoryIndex,
+      poseKey: pose.id || `canhan-${categoryIndex}-${poseIndex}`,
+    }))),
+  ], [kyyeuData, canhanData]);
+
+  const recordPoseView = (poseKey: string) => {
+    const updated = [{ poseKey, viewedAt: Date.now() }, ...readRecentPoseViews().filter((item) => item.poseKey !== poseKey)].slice(0, 20);
+    localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updated));
+    setRecentPoseViews(updated);
+  };
+
+  const openLibraryPose = (entry: LibraryPoseEntry) => {
+    setCurrentSection(entry.section);
+    if (entry.section === "kyyeu") setActiveKyyeuCatIdx(entry.categoryIndex);
+    else setActiveCanhanCatIdx(entry.categoryIndex);
+    setIsCategoryDetailOpen(true);
+    setSearchQuery("");
+    setFilterStatus("all");
+    setActivePoseModal({ pose: entry.pose, categoryName: entry.category.label, poseKey: entry.poseKey });
+    recordPoseView(entry.poseKey);
+  };
+
+  const openLibraryCategory = (section: "kyyeu" | "canhan", categoryIndex: number) => {
+    setCurrentSection(section);
+    if (section === "kyyeu") setActiveKyyeuCatIdx(categoryIndex);
+    else setActiveCanhanCatIdx(categoryIndex);
+    setIsCategoryDetailOpen(true);
+    setSearchQuery("");
+    setFilterStatus("all");
+  };
+
 
   // Filtered poses
   const displayedPoses = useMemo(() => {
@@ -584,6 +687,59 @@ export default function App() {
 
     if (syncData) await syncCoverImage(syncData);
     setActiveEditCover(null);
+  };
+
+  const requestCategoryDeletion = async (section: "kyyeu" | "canhan", category: CategoryItem, categoryIndex: number) => {
+    if (!isCurrentUserAdmin()) return;
+    const poseKeys = category.poses.map((pose, poseIndex) => pose.id || `${section}-${categoryIndex}-${poseIndex}`);
+    const localPhotoCount = poseKeys.reduce((count, key) => count + (photoCounts[key] || 0), 0);
+    setCategoryDeleteError("");
+    try {
+      const preview = await previewCategoryDeletion({ section, categoryId: category.id, poseKeys });
+      setCategoryDeleteCandidate({ section, category, categoryIndex, poseKeys, preview, localPhotoCount });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể kiểm tra dữ liệu chủ đề cần xóa.");
+    }
+  };
+
+  const confirmCategoryDeletion = async () => {
+    if (!categoryDeleteCandidate) return;
+    const { section, category, categoryIndex, poseKeys } = categoryDeleteCandidate;
+    setIsDeletingCategory(true);
+    setCategoryDeleteError("");
+    try {
+      await deleteCategoryFromCloud({ section, categoryId: category.id, poseKeys });
+      await deletePhotosForPoses(poseKeys);
+      purgeLocalRecordsForTopic(section, category.id, poseKeys);
+
+      if (section === "kyyeu") {
+        setKyyeuData((categories) => categories.filter((item) => item.id !== category.id));
+        setActiveKyyeuCatIdx((index) => Math.max(0, Math.min(index, categoryIndex - 1)));
+      } else {
+        setCanhanData((categories) => categories.filter((item) => item.id !== category.id));
+        setActiveCanhanCatIdx((index) => Math.max(0, Math.min(index, categoryIndex - 1)));
+      }
+      const deleted = JSON.parse(localStorage.getItem("posing_deleted_categories") || "[]") as Array<{ section: string; categoryId: string; poseKeys: string[] }>;
+      const existingDeletion = deleted.find((item) => item.section === section && item.categoryId === category.id);
+      if (existingDeletion) existingDeletion.poseKeys = [...new Set([...existingDeletion.poseKeys, ...poseKeys])];
+      else deleted.push({ section, categoryId: category.id, poseKeys });
+      localStorage.setItem("posing_deleted_categories", JSON.stringify(deleted));
+
+      const keySet = new Set(poseKeys);
+      for (const poseKey of poseKeys) localStorage.removeItem(`done-${poseKey}`);
+      const updatedViews = readRecentPoseViews().filter((item) => !keySet.has(item.poseKey));
+      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
+      setRecentPoseViews(updatedViews);
+      setReferenceSheetPoses((selected) => selected.filter((item) => !keySet.has(item.key)));
+      setIsCategoryDetailOpen(false);
+      setCategoryDeleteCandidate(null);
+      setDoneVersion((version) => version + 1);
+      await refreshPhotoCounts();
+    } catch (error) {
+      setCategoryDeleteError(error instanceof Error ? error.message : "Không thể xóa chủ đề. Hãy thử lại.");
+    } finally {
+      setIsDeletingCategory(false);
+    }
   };
 
   const returnToHome = () => {
@@ -766,6 +922,15 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
+
+            <HomeLibraryTools
+              kyyeuCategories={kyyeuData}
+              canhanCategories={canhanData}
+              poses={libraryPoses}
+              recentPoseKeys={recentPoseViews.map((item) => item.poseKey)}
+              onOpenPose={openLibraryPose}
+              onOpenCategory={openLibraryCategory}
+            />
 
             {/* 2 Main Big Cards with PENCIL ICON BUTTONS */}
             <div className="grid gap-4 sm:gap-5">
@@ -1114,6 +1279,8 @@ export default function App() {
                         category={cat}
                         completedCount={catCompleted}
                         isActive={isActive}
+                        isAdmin={isCurrentUserAdmin()}
+                        onDelete={() => void requestCategoryDeletion("canhan", cat, idx)}
                         onSelect={() => {
                           setActiveCanhanCatIdx(idx);
                           setIsCategoryDetailOpen(true);
@@ -1153,6 +1320,8 @@ export default function App() {
                       category={cat}
                       completedCount={catCompleted}
                       isActive={isActive}
+                      isAdmin={isCurrentUserAdmin()}
+                      onDelete={() => void requestCategoryDeletion("kyyeu", cat, idx)}
                       onSelect={() => {
                         setActiveKyyeuCatIdx(idx);
                         setIsCategoryDetailOpen(true);
@@ -1258,7 +1427,7 @@ export default function App() {
                       photoCount={count}
                       onClick={() => isSelectingSheetPoses
                         ? toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
-                        : setActivePoseModal({ pose, categoryName: currentCategory.label, poseKey })}
+                        : openLibraryPose({ pose, category: currentCategory, section: currentSection, categoryIndex: currentCatIdx, poseKey })}
                       isSelectedForSheet={referenceSheetPoses.some((item) => item.key === poseKey)}
                       onToggleSheetSelection={isSelectingSheetPoses
                         ? () => toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
@@ -1485,6 +1654,17 @@ export default function App() {
       />}
       {showReferenceSheet && (
         <ReferenceSheetModal poses={referenceSheetPoses} onClose={() => setShowReferenceSheet(false)} />
+      )}
+      {categoryDeleteCandidate && (
+        <CategoryDeleteConfirmModal
+          categoryName={categoryDeleteCandidate.category.label}
+          preview={categoryDeleteCandidate.preview}
+          localPhotoCount={categoryDeleteCandidate.localPhotoCount}
+          isDeleting={isDeletingCategory}
+          error={categoryDeleteError}
+          onConfirm={() => void confirmCategoryDeletion()}
+          onClose={() => { if (!isDeletingCategory) setCategoryDeleteCandidate(null); }}
+        />
       )}
     </div>
     </Suspense>

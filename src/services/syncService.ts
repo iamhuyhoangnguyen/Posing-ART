@@ -80,6 +80,44 @@ export function saveLocalCachedRecords(userId: string, records: Record<string, U
   }
 }
 
+export function purgeLocalRecordsForTopic(
+  section: "kyyeu" | "canhan",
+  categoryId: string,
+  poseKeys: string[],
+): void {
+  const userId = getCurrentUser()?.id || "guest";
+  const keys = new Set(poseKeys);
+  const records = getLocalCachedRecords(userId);
+  for (const [id, record] of Object.entries(records)) {
+    const data = record.data as { poseKey?: unknown; categoryId?: unknown; targetId?: unknown; sectionKey?: unknown; kind?: unknown };
+    const isPoseRecord = (record.type === "favorite" || record.type === "savedPose") &&
+      typeof data.poseKey === "string" && keys.has(data.poseKey);
+    const isCoverRecord = record.type === "setting" && data.sectionKey === section && (
+      (data.kind === "category" && data.targetId === categoryId) ||
+      (data.kind === "pose" && typeof data.targetId === "string" && keys.has(data.targetId))
+    );
+    const isCategoryRecord = (record.type === "collection" || record.type === "personalConcept") &&
+      (id === `collection_${categoryId}` || id === `concept_${categoryId}` || data.categoryId === categoryId);
+    if (isPoseRecord || isCoverRecord || isCategoryRecord) delete records[id];
+  }
+  saveLocalCachedRecords(userId, records);
+
+  const queue = getOfflineQueue().filter((record) => {
+    if (record.userId !== userId) return true;
+    const data = record.data as { poseKey?: unknown; categoryId?: unknown; targetId?: unknown; sectionKey?: unknown; kind?: unknown };
+    return !(
+      ((record.type === "favorite" || record.type === "savedPose") && typeof data.poseKey === "string" && keys.has(data.poseKey)) ||
+      (record.type === "setting" && data.sectionKey === section && (
+        (data.kind === "category" && data.targetId === categoryId) ||
+        (data.kind === "pose" && typeof data.targetId === "string" && keys.has(data.targetId))
+      )) ||
+      ((record.type === "collection" || record.type === "personalConcept") &&
+        (record.id === `collection_${categoryId}` || record.id === `concept_${categoryId}` || data.categoryId === categoryId))
+    );
+  });
+  saveOfflineQueue(queue);
+}
+
 /**
  * Offline Sync Queue Management
  */

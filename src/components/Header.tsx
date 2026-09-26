@@ -6,7 +6,7 @@ import {
   Sun,
   RotateCcw,
   FolderArchive,
-  Monitor,
+  SunMoon,
   Plus,
   Wifi,
   WifiOff,
@@ -181,7 +181,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : themePreference === "dark" ? (
               <Moon className="w-4 h-4 text-indigo-400" />
             ) : (
-              <Monitor className="w-4 h-4" />
+              <SunMoon className="w-4 h-4 text-sky-500" />
             )}
           </button>
 

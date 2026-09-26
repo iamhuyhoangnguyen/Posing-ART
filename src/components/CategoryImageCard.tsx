@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import type { CategoryItem } from "../types";
 import { OfflineImage } from "./OfflineImage";
 
@@ -8,6 +8,8 @@ interface CategoryImageCardProps {
   completedCount: number;
   isActive: boolean;
   onSelect: () => void;
+  isAdmin?: boolean;
+  onDelete?: () => void;
 }
 
 const FALLBACK_COVER = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80";
@@ -18,7 +20,10 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
   completedCount,
   isActive,
   onSelect,
+  isAdmin = false,
+  onDelete,
 }) => (
+  <div className="relative">
   <button
     type="button"
     onClick={onSelect}
@@ -47,12 +52,6 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
     <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-[11px] font-bold text-white border border-white/15">
       {completedCount}/{category.poses.length} dáng
     </div>
-    {isActive && (
-      <div className="absolute top-2.5 left-2.5 w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-sm">
-        <CheckCircle2 className="w-4 h-4" />
-      </div>
-    )}
-
     <div className="absolute bottom-3 left-3 right-3 text-white">
       <div className={`text-sm sm:text-base font-extrabold leading-tight ${isActive ? "text-amber-300" : "text-white"}`}>
         {category.label}
@@ -62,4 +61,16 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
       </div>
     </div>
   </button>
+  {isAdmin && onDelete && (
+    <button
+      type="button"
+      onClick={(event) => { event.stopPropagation(); onDelete(); }}
+      aria-label={`Xóa chủ đề ${category.label}`}
+      title={`Xóa chủ đề ${category.label}`}
+      className="absolute left-2.5 top-2.5 z-10 rounded-full border border-white/30 bg-rose-600/90 p-2 text-white shadow-lg transition hover:bg-rose-700 active:scale-95"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  )}
+  </div>
 );

@@ -203,6 +203,26 @@ export async function deletePhoto(id: number, cloudId?: string): Promise<void> {
   }
 }
 
+/** Remove cached reference photos locally after an administrator deleted their topic on the server. */
+export async function deletePhotosForPoses(poseKeys: string[]): Promise<number> {
+  if (!poseKeys.length) return 0;
+  const keySet = new Set(poseKeys);
+  const photos = await getAllPhotos();
+  const ids = photos.filter((photo) => keySet.has(photo.poseKey)).map((photo) => photo.id);
+  if (!ids.length) return 0;
+
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    ids.forEach((id) => store.delete(id));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Không thể xóa ảnh đã lưu trên thiết bị."));
+  });
+  return ids.length;
+}
+
 export async function getPhotoCounts(): Promise<Record<string, number>> {
   const photos = await getAllPhotos();
   const counts: Record<string, number> = {};
