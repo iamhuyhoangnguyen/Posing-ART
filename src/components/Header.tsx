@@ -6,6 +6,7 @@ import {
   Sun,
   RotateCcw,
   FolderArchive,
+  Monitor,
   Plus,
   Wifi,
   WifiOff,
@@ -32,9 +33,8 @@ interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenPersonal?: () => void;
   onResetSession: () => void;
-  darkMode: boolean;
   themePreference: "system" | "light" | "dark";
-  onThemePreferenceChange: (preference: "system" | "light" | "dark") => void;
+  onCycleTheme: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -54,9 +54,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
   onOpenPersonal,
   onResetSession,
-  darkMode,
   themePreference,
-  onThemePreferenceChange,
+  onCycleTheme,
 }) => {
   const percent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const [isOnline, setIsOnline] = useState(
@@ -171,20 +170,20 @@ export const Header: React.FC<HeaderProps> = ({
             <FolderArchive className="w-4 h-4" />
           </button>
 
-          <label className="p-1.5 sm:px-2 sm:py-1.5 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors inline-flex items-center gap-1.5">
-            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-            <span className="sr-only">Chọn giao diện</span>
-            <select
-              aria-label="Giao diện màu"
-              value={themePreference}
-              onChange={(event) => onThemePreferenceChange(event.target.value as "system" | "light" | "dark")}
-              className="max-w-[96px] bg-transparent text-[10px] font-semibold text-current outline-none sm:max-w-none"
-            >
-              <option value="system" className="bg-white text-zinc-900">Theo hệ thống</option>
-              <option value="light" className="bg-white text-zinc-900">Sáng</option>
-              <option value="dark" className="bg-white text-zinc-900">Tối</option>
-            </select>
-          </label>
+          <button
+            onClick={onCycleTheme}
+            title={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : themePreference === "dark" ? "Tối" : "Theo hệ thống"} · Bấm để đổi`}
+            aria-label={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : themePreference === "dark" ? "Tối" : "Theo hệ thống"}. Bấm để chuyển trạng thái`}
+            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
+          >
+            {themePreference === "light" ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : themePreference === "dark" ? (
+              <Moon className="w-4 h-4 text-indigo-400" />
+            ) : (
+              <Monitor className="w-4 h-4" />
+            )}
+          </button>
 
           {handlePersonalClick && (
             <button

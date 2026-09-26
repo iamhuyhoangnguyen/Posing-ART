@@ -234,6 +234,11 @@ export default function App() {
     setThemePreference(preference);
   };
 
+  const handleCycleTheme = () => {
+    const nextPreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
+    handleThemePreferenceChange(nextPreference);
+  };
+
   const handleToggleDarkMode = () => {
     handleThemePreferenceChange(darkMode ? "light" : "dark");
   };
@@ -617,9 +622,8 @@ export default function App() {
         onOpenSettings={() => setShowPersonalModal(true)}
         onOpenPersonal={() => setShowPersonalModal(true)}
         onResetSession={handleResetSession}
-        darkMode={darkMode}
         themePreference={themePreference}
-        onThemePreferenceChange={handleThemePreferenceChange}
+        onCycleTheme={handleCycleTheme}
       />
 
       {/* Main Content Area */}
