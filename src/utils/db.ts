@@ -4,6 +4,14 @@ import { getCurrentUser } from "./userAuth";
 const DB_NAME = "PosingArtDB";
 const DB_VERSION = 1;
 const STORE_NAME = "photos";
+export const MAX_PHOTOS_PER_TOPIC = 30;
+
+export class PhotoLimitError extends Error {
+  constructor() {
+    super(`Mỗi chủ đề lưu tối đa ${MAX_PHOTOS_PER_TOPIC} ảnh.`);
+    this.name = "PhotoLimitError";
+  }
+}
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -87,14 +95,23 @@ export async function addPhotos(
     const tx = db.transaction(STORE_NAME, "readwrite");
     const store = tx.objectStore(STORE_NAME);
     const addedIds = new Array<number>(items.length);
-    items.forEach((item, index) => {
-      const req = store.add(item);
-      req.onsuccess = () => { addedIds[index] = req.result as number; };
-      req.onerror = () => reject(req.error);
-    });
+    let limitError: PhotoLimitError | null = null;
+    const countRequest = store.index("poseKey").count(poseKey);
+    countRequest.onsuccess = () => {
+      if (countRequest.result + items.length > MAX_PHOTOS_PER_TOPIC) {
+        limitError = new PhotoLimitError();
+        tx.abort();
+        return;
+      }
+      items.forEach((item, index) => {
+        const req = store.add(item);
+        req.onsuccess = () => { addedIds[index] = req.result as number; };
+      });
+    };
+    countRequest.onerror = () => reject(countRequest.error);
     tx.oncomplete = () => resolve(addedIds);
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error("Không thể lưu ảnh vào thiết bị."));
+    tx.onabort = () => reject(limitError || tx.error || new Error("Không thể lưu ảnh vào thiết bị."));
   });
 
   // Background sync retries this IndexedDB record later if the server is offline.

@@ -10,7 +10,6 @@ import {
   Heart,
   ChevronRight,
   Layers,
-  Wand2,
   ExternalLink,
   BookOpen,
   Filter,
@@ -32,19 +31,12 @@ import { getRednoteChineseSearchUrl } from "../utils/rednoteTranslator";
 
 interface VisualIdeaLibrarySectionProps {
   onBackToHome: () => void;
-  onOpenPoseGenerator: (
-    prompt: string,
-    refImage?: string,
-    conceptName?: string,
-    poseTitle?: string
-  ) => void;
   onOpenPoseModal?: (pose: PoseItem, categoryName: string, poseKey: string) => void;
   existingCanhanData?: CategoryItem[];
 }
 
 export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> = ({
   onBackToHome,
-  onOpenPoseGenerator,
   onOpenPoseModal,
   existingCanhanData = [],
 }) => {
@@ -397,21 +389,6 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
 
-                  {/* AI Quick Generator for this location */}
-                  <button
-                    onClick={() =>
-                      onOpenPoseGenerator(
-                        `Tạo dáng chụp tại bối cảnh ${currentLoc.name}`,
-                        currentLoc.coverImage,
-                        currentLoc.name,
-                        `Concept ${currentLoc.name}`
-                      )
-                    }
-                    className="flex-1 sm:flex-initial text-xs font-bold px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                  >
-                    <Wand2 className="w-3.5 h-3.5" />
-                    <span>Tạo dáng AI bối cảnh này</span>
-                  </button>
                 </div>
               </div>
             )}
@@ -528,24 +505,8 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
                             </div>
                           </div>
 
-                          {/* Action Buttons: Fast AI Pose Generator + Details */}
+                          {/* Action Buttons: Details */}
                           <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onOpenPoseGenerator(
-                                  `Concept: ${idea.title}. Trang phục: ${idea.outfitSuggestion}. Đạo cụ: ${idea.propsSuggestion}. Mood: ${idea.mood}`,
-                                  idea.coverImage,
-                                  idea.title,
-                                  idea.title
-                                )
-                              }
-                              className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                            >
-                              <Wand2 className="w-3.5 h-3.5" />
-                              <span>Tạo dáng AI</span>
-                            </button>
-
                             <button
                               type="button"
                               onClick={() => setSelectedDetailIdea(idea)}
@@ -635,21 +596,6 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
                     </div>
 
                     <div className="pt-2 flex items-center gap-2">
-                      <button
-                        onClick={() =>
-                          onOpenPoseGenerator(
-                            `Concept: ${cat.label}`,
-                            cat.coverImage,
-                            cat.label,
-                            cat.label
-                          )
-                        }
-                        className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                      >
-                        <Wand2 className="w-3.5 h-3.5" />
-                        <span>Biến Tấu Dáng AI</span>
-                      </button>
-
                       {onOpenPoseModal && cat.poses[0] && (
                         <button
                           onClick={() =>
@@ -774,24 +720,6 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
 
               {/* Action Trigger */}
               <div className="pt-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const idea = selectedDetailIdea;
-                    setSelectedDetailIdea(null);
-                    onOpenPoseGenerator(
-                      `Concept: ${idea.title}. Trang phục: ${idea.outfitSuggestion}. Đạo cụ: ${idea.propsSuggestion}`,
-                      idea.coverImage,
-                      idea.title,
-                      idea.title
-                    );
-                  }}
-                  className="flex-1 py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
-                >
-                  <Wand2 className="w-4 h-4" />
-                  <span>Mở AI Pose Generator Cho Concept Này</span>
-                </button>
-
                 <a
                   href={getRednoteChineseSearchUrl(`${selectedDetailIdea.title} 摄影`)}
                   target="_blank"

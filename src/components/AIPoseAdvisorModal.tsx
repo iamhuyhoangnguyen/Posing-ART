@@ -25,7 +25,7 @@ import {
   PhotographerContext,
   PoseAnalysisData,
 } from "../types";
-import { addPhoto } from "../utils/db";
+import { addPhoto, MAX_PHOTOS_PER_TOPIC, PhotoLimitError } from "../utils/db";
 import { serverUrl } from "../services/apiUrl";
 
 interface AIPoseAdvisorModalProps {
@@ -140,6 +140,9 @@ export const AIPoseAdvisorModal: React.FC<AIPoseAdvisorModalProps> = ({
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (e) {
       console.error("Lỗi khi lưu ảnh vào dáng:", e);
+      setError(e instanceof PhotoLimitError
+        ? `Chủ đề đã đạt giới hạn ${MAX_PHOTOS_PER_TOPIC} ảnh. Hãy xóa bớt ảnh trước khi lưu.`
+        : "Không thể lưu ảnh vào chủ đề. Hãy thử lại sau.");
     }
   };
 

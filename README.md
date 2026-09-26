@@ -1,4 +1,4 @@
-# POSING ART 2.3.0
+# POSING ART 2.4.1
 
 Sổ tay tạo dáng và trợ lý nhiếp ảnh. Dự án hỗ trợ Web/PWA và Android; tài khoản, ảnh và dữ liệu concept đồng bộ qua backend Express.
 
@@ -26,7 +26,7 @@ Backend hiện giữ bản dữ liệu đang chạy trong bộ nhớ để tươ
 
 ## Tính năng ảnh và AI
 
-Ảnh được lưu ngoại tuyến trong IndexedDB. Có thể chọn nhiều ảnh cho một tư thế; Android mở trình chọn ảnh nhiều mục. Từ menu ba chấm trên ảnh có thể tải hoặc chia sẻ; chế độ chọn nhiều cho phép tải hàng loạt.
+Ảnh được lưu ngoại tuyến trong IndexedDB. Mỗi chủ đề lưu tối đa 30 ảnh; Android mở trình chọn ảnh nhiều mục. Từ menu ba chấm trên ảnh có thể tải hoặc chia sẻ; chế độ chọn nhiều cho phép tải hàng loạt.
 
 Backend cung cấp `/api/ai/creative-chat` và `/api/ai/analyze-pose`. Khi triển khai, đặt `GEMINI_API_KEY` trên Render. `/api/health` và `/api/version` cung cấp trạng thái dịch vụ và thông tin phiên bản.
 

@@ -19,7 +19,7 @@ import {
   Square,
 } from "lucide-react";
 import { PoseItem, PhotoRecord, UserAccount } from "../types";
-import { getPhotosForPose, addPhoto, addPhotos, deletePhoto } from "../utils/db";
+import { getPhotosForPose, addPhoto, addPhotos, deletePhoto, MAX_PHOTOS_PER_TOPIC, PhotoLimitError } from "../utils/db";
 import { pickImageFiles, saveImageToDevice, shareImageToDevice } from "../services/platformService";
 import {
   getPinterestSearchUrl,
@@ -98,8 +98,14 @@ export const PoseModal: React.FC<PoseModalProps> = ({
           const file = items[i].getAsFile();
           if (file) {
             e.preventDefault();
-            await handleAddSinglePhoto(file);
-            setPasteToast("✓ Đã dán ảnh chất lượng cao thành công!");
+            try {
+              await handleAddSinglePhoto(file);
+              setPasteToast("✓ Đã dán ảnh chất lượng cao thành công!");
+            } catch (error) {
+              setPasteToast(error instanceof PhotoLimitError
+                ? `Chủ đề đã đạt giới hạn ${MAX_PHOTOS_PER_TOPIC} ảnh. Hãy xóa bớt ảnh trước khi thêm.`
+                : "Không thể lưu ảnh. Hãy kiểm tra dung lượng thiết bị rồi thử lại.");
+            }
             setTimeout(() => setPasteToast(null), 3500);
           }
         }
@@ -152,7 +158,9 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       setTimeout(() => setPasteToast(null), 4000);
     } catch (error) {
       console.error("Bulk photo upload failed:", error);
-      setPasteToast("Không thể lưu ảnh. Hãy thử chọn ít ảnh hơn hoặc kiểm tra dung lượng thiết bị.");
+      setPasteToast(error instanceof PhotoLimitError
+        ? `Mỗi chủ đề lưu tối đa ${MAX_PHOTOS_PER_TOPIC} ảnh. Chủ đề hiện có ${photos.length} ảnh; hãy chọn ít ảnh hơn hoặc xóa bớt ảnh.`
+        : "Không thể lưu ảnh. Hãy thử chọn ít ảnh hơn hoặc kiểm tra dung lượng thiết bị.");
       setTimeout(() => setPasteToast(null), 5000);
     }
   };
@@ -220,8 +228,10 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       }
       setPasteToast("💡 Nhấn Ctrl + V trên bàn phím (hoặc giữ chạm Dán) để dán ảnh trực tiếp!");
       setTimeout(() => setPasteToast(null), 4000);
-    } catch {
-      setPasteToast("💡 Nhấn phím Ctrl + V trên bàn phím để dán ảnh trực tiếp!");
+    } catch (error) {
+      setPasteToast(error instanceof PhotoLimitError
+        ? `Chủ đề đã đạt giới hạn ${MAX_PHOTOS_PER_TOPIC} ảnh. Hãy xóa bớt ảnh trước khi thêm.`
+        : "💡 Nhấn phím Ctrl + V trên bàn phím để dán ảnh trực tiếp!");
       setTimeout(() => setPasteToast(null), 4000);
     }
   };
