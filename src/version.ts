@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.6.1";
-export const APP_BUILD_NUMBER = 261;
+export const APP_VERSION = "2.6.2";
+export const APP_BUILD_NUMBER = 262;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 2.6.2: công tắc giao diện Sáng/Tối gọn hơn và link tìm kiếm mở app trên điện thoại khi có thể.",
   "Phiên bản 2.6.1: sửa khung hiển thị ảnh bìa và tải ảnh trực tuyến ổn định hơn.",
   "Phiên bản 2.6.0: xóa chủ đề dành cho Admin, tìm kiếm toàn thư viện, xem gần đây và gợi ý dáng ngẫu nhiên.",
   "Phiên bản 2.5.0: xem lại ảnh đã tải offline, tạo tờ tham khảo từ nhiều dáng và chuyển ảnh mượt hơn.",

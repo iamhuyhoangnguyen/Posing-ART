@@ -28,6 +28,7 @@ import {
   getInspirationSearchQuery,
 } from "../utils/inspirationLinks";
 import { isAdminAuthenticated } from "../utils/adminAuth";
+import { InspirationSearchLink } from "./InspirationSearchLink";
 import { getCurrentUser, isCurrentUserAdmin } from "../utils/userAuth";
 
 interface PoseModalProps {
@@ -306,10 +307,8 @@ export const PoseModal: React.FC<PoseModalProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <a
+              <InspirationSearchLink
                 href={getPinterestSearchUrl(categoryName, categoryName, pose.title)}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="py-2 px-3 rounded-xl bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all text-center"
               >
                 <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
@@ -317,19 +316,17 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                 </svg>
                 <span>Pinterest</span>
                 <ExternalLink className="w-3 h-3 opacity-80" />
-              </a>
+              </InspirationSearchLink>
 
-              <a
+              <InspirationSearchLink
                 href={getRednoteSearchUrl(categoryName, categoryName, pose.title)}
-                target="_blank"
-                rel="noopener noreferrer"
                 title={`Tìm kiếm tiếng Trung: ${getInspirationSearchQuery(categoryName, categoryName, pose.title).rednoteQuery}`}
                 className="py-2 px-3 rounded-xl bg-[#FF2442] hover:bg-[#d91934] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all text-center"
               >
                 <span className="text-[10px] font-black bg-white/20 px-1 rounded-sm">RED</span>
                 <span>Rednote (Tiếng Trung)</span>
                 <ExternalLink className="w-3 h-3 opacity-80" />
-              </a>
+              </InspirationSearchLink>
             </div>
 
             <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-2 bg-zinc-50 dark:bg-zinc-800/60 p-2 rounded-xl border border-zinc-200/60 dark:border-zinc-700/60 flex items-center justify-between">

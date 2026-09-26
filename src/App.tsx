@@ -258,15 +258,13 @@ export default function App() {
     currentImage?: string;
   } | null>(null);
 
-  // Theme preference: explicit light/dark choice or a user-selected system mode.
-  const [themePreference, setThemePreference] = useState<"system" | "light" | "dark">(() => {
+  // Theme preference has two explicit states. Legacy "system" settings are
+  // normalized to the current system appearance by main.tsx on startup.
+  const [themePreference, setThemePreference] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("theme");
-    return saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
+    return saved === "dark" ? "dark" : "light";
   });
-  const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
-    window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
-  const darkMode = themePreference === "system" ? systemPrefersDark : themePreference === "dark";
+  const darkMode = themePreference === "dark";
   const themeMountedRef = useRef(false);
 
   // Done tracker trigger for re-rendering
@@ -289,21 +287,13 @@ export default function App() {
     };
   }, [darkMode]);
 
-  useEffect(() => {
-    const preference = window.matchMedia("(prefers-color-scheme: dark)");
-    const followSystemPreference = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
-    preference.addEventListener("change", followSystemPreference);
-    return () => preference.removeEventListener("change", followSystemPreference);
-  }, []);
-
-  const handleThemePreferenceChange = (preference: "system" | "light" | "dark") => {
+  const handleThemePreferenceChange = (preference: "light" | "dark") => {
     localStorage.setItem("theme", preference);
     setThemePreference(preference);
   };
 
   const handleCycleTheme = () => {
-    const nextPreference = themePreference === "light" ? "dark" : themePreference === "dark" ? "system" : "light";
-    handleThemePreferenceChange(nextPreference);
+    handleThemePreferenceChange(themePreference === "light" ? "dark" : "light");
   };
 
   const handleToggleDarkMode = () => {

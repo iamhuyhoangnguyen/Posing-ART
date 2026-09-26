@@ -28,6 +28,7 @@ import {
 } from "../data/visualIdeaData";
 import { AddVisualIdeaModal } from "./AddVisualIdeaModal";
 import { getRednoteChineseSearchUrl } from "../utils/rednoteTranslator";
+import { InspirationSearchLink } from "./InspirationSearchLink";
 
 interface VisualIdeaLibrarySectionProps {
   onBackToHome: () => void;
@@ -379,15 +380,13 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
 
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   {/* Rednote Chinese inspiration for this location */}
-                  <a
+                  <InspirationSearchLink
                     href={getRednoteChineseSearchUrl(`${currentLoc.name} Chụp ảnh concept`)}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="flex-1 sm:flex-initial text-xs font-bold px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-900 flex items-center justify-center gap-1.5 transition-colors"
                   >
                     <span>Rednote (Tiểu Hồng Thư)</span>
                     <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                  </InspirationSearchLink>
 
                 </div>
               </div>
@@ -720,15 +719,13 @@ export const VisualIdeaLibrarySection: React.FC<VisualIdeaLibrarySectionProps> =
 
               {/* Action Trigger */}
               <div className="pt-2 flex items-center gap-2">
-                <a
+                <InspirationSearchLink
                   href={getRednoteChineseSearchUrl(`${selectedDetailIdea.title} 摄影`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="py-3 px-4 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 border border-rose-200 dark:border-rose-900 transition-colors"
                 >
                   <span>Rednote</span>
                   <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+                </InspirationSearchLink>
               </div>
             </div>
           </div>

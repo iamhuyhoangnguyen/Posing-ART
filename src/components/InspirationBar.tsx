@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { ExternalLink, Copy, Check, Sparkles, Globe } from "lucide-react";
+import { InspirationSearchLink } from "./InspirationSearchLink";
 import {
   getPinterestSearchUrl,
   getRednoteSearchUrl,
@@ -55,10 +56,8 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
         {/* Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           {/* Pinterest Button */}
-          <a
+          <InspirationSearchLink
             href={pUrl}
-            target="_blank"
-            rel="noopener noreferrer"
             title={`Tìm ảnh "${categoryLabel}" trên Pinterest`}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#E60023] hover:bg-[#ad081b] text-white text-xs font-bold shadow-xs active:scale-95 transition-all"
           >
@@ -67,20 +66,18 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
             </svg>
             <span>Pinterest</span>
             <ExternalLink className="w-3 h-3 opacity-80" />
-          </a>
+          </InspirationSearchLink>
 
           {/* Rednote (Xiaohongshu) Button */}
-          <a
+          <InspirationSearchLink
             href={rUrl}
-            target="_blank"
-            rel="noopener noreferrer"
             title={`Tìm ảnh "${queries.rednoteQuery}" trên Rednote (Tiểu Hồng Thư)`}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FF2442] hover:bg-[#d91934] text-white text-xs font-bold shadow-xs active:scale-95 transition-all"
           >
             <span className="font-extrabold text-[10px] tracking-tight bg-white/25 px-1 rounded-sm">RED</span>
             <span>Rednote</span>
             <ExternalLink className="w-3 h-3 opacity-80" />
-          </a>
+          </InspirationSearchLink>
 
           {/* Quick Copy Keywords */}
           <button
@@ -104,16 +101,14 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
             Gợi ý nhanh:
           </span>
           {conceptMeta.recommendedTags.map((tag, idx) => (
-            <a
+            <InspirationSearchLink
               key={idx}
               href={`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(tag + " nữ dáng chụp")}`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800/80 px-2.5 py-1 rounded-lg border border-zinc-200/60 dark:border-zinc-700 hover:text-zinc-900 dark:hover:text-white transition-colors inline-flex items-center gap-1 active:scale-95"
             >
               <span>{tag}</span>
               <ExternalLink className="w-2.5 h-2.5 opacity-50" />
-            </a>
+            </InspirationSearchLink>
           ))}
         </div>
       )}

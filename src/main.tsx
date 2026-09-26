@@ -10,6 +10,9 @@ const initialDarkMode = savedTheme === 'dark'
   : savedTheme === 'light'
     ? false
     : window.matchMedia('(prefers-color-scheme: dark)').matches;
+if (savedTheme !== 'light' && savedTheme !== 'dark') {
+  localStorage.setItem('theme', initialDarkMode ? 'dark' : 'light');
+}
 document.documentElement.classList.toggle('dark', initialDarkMode);
 document.documentElement.style.colorScheme = initialDarkMode ? 'dark' : 'light';
 

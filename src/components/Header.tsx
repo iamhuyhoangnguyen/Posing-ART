@@ -6,7 +6,6 @@ import {
   Sun,
   RotateCcw,
   FolderArchive,
-  SunMoon,
   Plus,
   Wifi,
   WifiOff,
@@ -33,7 +32,7 @@ interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenPersonal?: () => void;
   onResetSession: () => void;
-  themePreference: "system" | "light" | "dark";
+  themePreference: "light" | "dark";
   onCycleTheme: () => void;
 }
 
@@ -172,16 +171,14 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onCycleTheme}
-            title={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : themePreference === "dark" ? "Tối" : "Theo hệ thống"} · Bấm để đổi`}
-            aria-label={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : themePreference === "dark" ? "Tối" : "Theo hệ thống"}. Bấm để chuyển trạng thái`}
+            title={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : "Tối"} · Bấm để đổi`}
+            aria-label={`Giao diện hiện tại: ${themePreference === "light" ? "Sáng" : "Tối"}. Bấm để chuyển trạng thái`}
             className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
           >
             {themePreference === "light" ? (
               <Sun className="w-4 h-4 text-amber-500" />
-            ) : themePreference === "dark" ? (
-              <Moon className="w-4 h-4 text-indigo-400" />
             ) : (
-              <SunMoon className="w-4 h-4 text-sky-500" />
+              <Moon className="w-4 h-4 text-indigo-400" />
             )}
           </button>
 

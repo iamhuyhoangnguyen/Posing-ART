@@ -18,6 +18,7 @@ import {
   User,
 } from "lucide-react";
 import { getRednoteChineseSearchUrl } from "../utils/rednoteTranslator";
+import { InspirationSearchLink } from "./InspirationSearchLink";
 import { serverUrl } from "../services/apiUrl";
 
 export type AIModelType = "chatgpt" | "gemini" | "claude";
@@ -473,17 +474,15 @@ Hãy thử chọn một gợi ý bên dưới hoặc bấm micro để nói nhé
                     </div>
 
                     {chineseKeyword && (
-                      <a
+                      <InspirationSearchLink
                         href={getRednoteChineseSearchUrl(chineseKeyword)}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         title={`Tìm kiếm từ khóa "${chineseKeyword}" trên Rednote`}
                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-[#FF2442] hover:bg-[#d91934] px-2.5 py-1 rounded-lg shadow-2xs transition-colors"
                       >
                         <span className="bg-white/20 text-[9px] px-1 rounded-sm">RED</span>
                         <span>Tìm ảnh mẫu trên Rednote (Tiếng Trung)</span>
                         <ExternalLink className="w-2.5 h-2.5 opacity-80" />
-                      </a>
+                      </InspirationSearchLink>
                     )}
                   </div>
                 )}
