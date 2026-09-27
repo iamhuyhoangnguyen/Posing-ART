@@ -28,7 +28,16 @@ export interface CategoryItem {
   label: string;
   coverImage?: string; // Cover photo for this category/concept
   description?: string;
+  /** V3 flat category gallery. `poses` is retained only to read V2 backups during transition. */
+  images?: CategoryGalleryImage[];
   poses: PoseItem[];
+}
+
+export interface CategoryGalleryImage {
+  id: string;
+  imageUrl?: string;
+  photoId?: string;
+  sourcePoseId?: string;
 }
 
 export interface PhotoRecord {
@@ -37,6 +46,7 @@ export interface PhotoRecord {
   cloudId?: string;
   ownerUserId?: string;
   poseKey: string;
+  legacyPoseKey?: string;
   blob: Blob | File;
   dataUrl?: string;
   createdAt: number;

@@ -36,6 +36,8 @@ import { serverUrl } from "../services/apiUrl";
 interface PoseModalProps {
   pose: PoseItem | null;
   categoryName: string;
+  isCategoryGallery?: boolean;
+  reservedImageCount?: number;
   poseKey: string;
   onClose: () => void;
   onOpenAdvisor: (pose: PoseItem, category: string, initialPhoto?: string) => void;
@@ -46,6 +48,8 @@ interface PoseModalProps {
 export const PoseModal: React.FC<PoseModalProps> = ({
   pose,
   categoryName,
+  isCategoryGallery = false,
+  reservedImageCount = 0,
   poseKey,
   onClose,
   onOpenAdvisor,
@@ -143,6 +147,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
     await addPhoto(poseKey, file, undefined, undefined, {
       uploadedBy,
       uploaderRole,
+      reservedImageCount: isCategoryGallery ? reservedImageCount : 0,
     });
 
     await loadPhotos();
@@ -175,6 +180,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       await addPhotos(poseKey, files, undefined, undefined, {
         uploadedBy: user?.name || "Tài khoản con",
         uploaderRole: isAdmin ? "admin" : "member",
+        reservedImageCount: isCategoryGallery ? reservedImageCount : 0,
       });
       await loadPhotos();
       onPhotosUpdated();
@@ -371,7 +377,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
         {/* Content Body */}
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
           {/* Pinterest & Rednote External Exploration Section */}
-          <div className="bg-gradient-to-r from-red-50/70 via-rose-50/50 to-amber-50/60 dark:from-zinc-800/80 dark:to-zinc-800/50 border border-red-200/70 dark:border-zinc-700/60 rounded-2xl p-3 space-y-2">
+          {!isCategoryGallery && <div className="bg-gradient-to-r from-red-50/70 via-rose-50/50 to-amber-50/60 dark:from-zinc-800/80 dark:to-zinc-800/50 border border-red-200/70 dark:border-zinc-700/60 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-rose-500" />
@@ -422,7 +428,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                 🇨🇳 Tự động quy đổi tiếng Trung: <strong className="text-zinc-800 dark:text-zinc-200 font-semibold">{getInspirationSearchQuery(categoryName, categoryName, pose.title).rednoteQuery}</strong>
               </span>
             </div>
-          </div>
+          </div>}
 
           {/* Photo Gallery Section */}
           <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
@@ -442,7 +448,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-1.5">
-                Ảnh Tham Khảo ({photos.length})
+                {isCategoryGallery ? `Ảnh trong danh mục (${photos.length})` : `Ảnh tham khảo (${photos.length})`}
               </span>
 
               <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -534,9 +540,20 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                   >
                     <img
                       src={imgUrl}
-                      alt="Tham khảo dáng"
+                      alt={isCategoryGallery ? "Ảnh trong danh mục" : "Ảnh tham khảo"}
                       className="h-full w-full rounded-2xl object-cover transition-transform group-hover:scale-105"
                     />
+                    {p.cloudId && (
+                      <a
+                        href={`https://lens.google.com/uploadbyurl?url=${encodeURIComponent(serverUrl(`/api/cloud/photo/${encodeURIComponent(p.cloudId)}/image`))}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                        title="Tìm ảnh tương tự trên toàn web bằng Google Lens; không tìm riêng trên Pinterest/RedNote"
+                        aria-label="Tìm ảnh tương tự trên toàn web"
+                        className="absolute bottom-2 left-2 z-10 rounded-full bg-black/70 px-2 py-1 text-[9px] font-bold text-white shadow backdrop-blur"
+                      >Tìm ảnh tương tự</a>
+                    )}
 
                     {selectionMode && (
                       <div className="absolute top-1.5 left-1.5 rounded-md bg-black/60 p-1 text-white">
@@ -547,13 +564,13 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                     {/* Photo actions menu */}
                     <div className="absolute top-1.5 right-1.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       {/* Set as cover button */}
-                      {onSetAsCover && (
+                    {onSetAsCover && !isCategoryGallery && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             onSetAsCover(imgUrl);
                           }}
-                          title="Đặt ảnh này làm ảnh đại diện của dáng"
+                          title="Đặt ảnh này làm ảnh đại diện"
                           className="p-1 rounded-full bg-black/60 text-white hover:bg-amber-500 transition-colors"
                         >
                           <Star className="w-3 h-3" />
@@ -600,7 +617,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
             )}
           </div>
 
-          <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-3.5 dark:border-violet-900/60 dark:bg-violet-950/30">
+          {!isCategoryGallery && <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-3.5 dark:border-violet-900/60 dark:bg-violet-950/30">
             <div className="mb-2 flex items-center gap-2 text-sm font-bold text-violet-800 dark:text-violet-200">
               <Sparkles className="h-4 w-4" /> Trợ lý AI
             </div>
@@ -609,7 +626,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                 Phân tích dáng
               </button>
             </div>
-          </section>
+          </section>}
         </div>
       </div>
 

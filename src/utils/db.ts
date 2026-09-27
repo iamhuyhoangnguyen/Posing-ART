@@ -4,7 +4,7 @@ import { getCurrentUser } from "./userAuth";
 const DB_NAME = "PosingArtDB";
 const DB_VERSION = 1;
 const STORE_NAME = "photos";
-export const MAX_PHOTOS_PER_TOPIC = 30;
+export const MAX_PHOTOS_PER_TOPIC = 100;
 
 export class PhotoLimitError extends Error {
   constructor() {
@@ -55,6 +55,7 @@ export async function addPhoto(
   extra?: {
     uploadedBy?: string;
     uploaderRole?: "admin" | "member";
+    reservedImageCount?: number;
   }
 ): Promise<number> {
   const [id] = await addPhotos(poseKey, [blob], note, cloudId, extra);
@@ -69,6 +70,7 @@ export async function addPhotos(
   extra?: {
     uploadedBy?: string;
     uploaderRole?: "admin" | "member";
+    reservedImageCount?: number;
   },
 ): Promise<number[]> {
   if (!blobs.length) return [];
@@ -98,7 +100,7 @@ export async function addPhotos(
     let limitError: PhotoLimitError | null = null;
     const countRequest = store.index("poseKey").count(poseKey);
     countRequest.onsuccess = () => {
-      if (countRequest.result + items.length > MAX_PHOTOS_PER_TOPIC) {
+      if (countRequest.result + items.length + (extra?.reservedImageCount || 0) > MAX_PHOTOS_PER_TOPIC) {
         limitError = new PhotoLimitError();
         tx.abort();
         return;
@@ -180,6 +182,29 @@ export async function getAllPhotos(): Promise<PhotoRecord[]> {
     req.onsuccess = () => resolve((req.result || []) as PhotoRecord[]);
     req.onerror = () => reject(req.error);
   });
+}
+
+/** Re-key cached V2 pose photos into their V3 category gallery without deleting any records. */
+export async function remapPhotosToCategoryGalleries(keyMap: Map<string, string>): Promise<number> {
+  if (!keyMap.size) return 0;
+  const photos = await getAllPhotos();
+  const toUpdate = photos.filter((photo) => keyMap.has(photo.poseKey) && keyMap.get(photo.poseKey) !== photo.poseKey);
+  if (!toUpdate.length) return 0;
+  const db = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const photo of toUpdate) {
+      const previousPoseKey = photo.poseKey;
+      photo.legacyPoseKey = photo.legacyPoseKey || previousPoseKey;
+      photo.poseKey = keyMap.get(previousPoseKey)!;
+      store.put(photo);
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("Không thể chuyển ảnh cũ sang gallery danh mục."));
+  });
+  return toUpdate.length;
 }
 
 export async function deletePhoto(id: number, cloudId?: string): Promise<void> {

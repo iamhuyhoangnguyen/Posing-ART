@@ -26,7 +26,6 @@ interface HeaderProps {
   filterStatus?: FilterStatus;
   onFilterChange?: (status: FilterStatus) => void;
   onOpenBackup: () => void;
-  onOpenAddCustom: () => void;
   onOpenInstallGuide?: () => void;
   onOpenUpdate?: () => void;
   onOpenSettings?: () => void;
@@ -47,7 +46,6 @@ export const Header: React.FC<HeaderProps> = ({
   filterStatus = "all",
   onFilterChange,
   onOpenBackup,
-  onOpenAddCustom,
   onOpenInstallGuide,
   onOpenUpdate,
   onOpenSettings,
@@ -103,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
                 title={
                   isOnline
                     ? "Đang kết nối: Có thể dùng toàn bộ tính năng AI và tải ảnh trực tuyến"
-                    : "Đang ngoại tuyến: Mọi dữ liệu tư thế & ảnh lưu máy hoạt động bình thường"
+                    : "Đang ngoại tuyến: Danh mục và ảnh lưu trên máy vẫn sử dụng được"
                 }
                 className={`hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                   isOnline
@@ -154,14 +152,6 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           <button
-            onClick={onOpenAddCustom}
-            title="Thêm dáng / concept riêng"
-            className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-
-          <button
             onClick={onOpenBackup}
             title="Sao lưu / Xuất file Offline"
             className="p-1.5 sm:p-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 transition-colors"
@@ -203,7 +193,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
               Tiến độ chụp thực tế:
               <strong className="text-zinc-900 dark:text-zinc-100">
-                {completedCount} / {totalCount} dáng ({percent}%)
+                {completedCount} / {totalCount} ảnh ({percent}%)
               </strong>
             </span>
 

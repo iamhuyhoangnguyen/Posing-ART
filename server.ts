@@ -13,6 +13,7 @@ import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services
 import { withGeminiUnavailableRetry } from "./src/services/geminiRetry";
 import { APP_RELEASE_DATE, APP_VERSION, CURRENT_RELEASE_NOTES } from "./src/version";
 import { INITIAL_DATA_CANHAN, INITIAL_DATA_KYYEU } from "./src/data/posesData";
+import { appendGalleryPhotoReferences, categoryGalleryKey, createLegacyPoseKeyMap, remapLegacyGalleryPhotos, UNCATEGORIZED_CATEGORY_ID } from "./src/utils/categoryGallery";
 
 dotenv.config();
 
@@ -65,6 +66,8 @@ interface CloudPhotoItem {
   ownerUserId?: string;
   localPhotoId?: string;
   poseKey: string;
+  /** Original V2 pose key retained so a V3 migration can be rolled back. */
+  legacyPoseKey?: string;
   dataUrl: string;
   note?: string;
   uploadedBy?: string;
@@ -136,6 +139,8 @@ interface CloudDriveData {
   deletedPoseKeys: string[];
   updatedAt: number;
   legacyMigrationComplete?: boolean;
+  galleryV300MigrationComplete?: boolean;
+  galleryV300BackupReference?: string;
 }
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.resolve(__dirname, "data"));
@@ -514,34 +519,39 @@ async function persistMongoStore(data: CloudDriveData, previousData?: CloudDrive
     _id: String(category?.id || `category:${index}`),
     data: category,
   }));
-  await Promise.all([
+  const writes: Promise<void>[] = [
     syncMongoCollection(mongoCollections.users, toUserDocuments(data.users), previousData && toUserDocuments(previousData.users)),
     syncMongoCollection(mongoCollections.photos, toPhotoDocuments(data.photos), previousData && toPhotoDocuments(previousData.photos)),
     syncMongoCollection(mongoCollections.records, toRecordDocuments(data.records), previousData && toRecordDocuments(previousData.records)),
-    syncMongoCollection(
-      mongoCollections.customPoses,
-      toPoseDocuments(data.customPoses, currentPoseIds),
-      previousData && toPoseDocuments(previousData.customPoses, previousPoseIds),
-    ),
     syncMongoCollection(
       mongoCollections.customCategories,
       toCategoryDocuments(data.customCategories),
       previousData && toCategoryDocuments(previousData.customCategories),
     ),
-    mongoCollections.metadata.replaceOne(
-      { _id: "primary" },
-      {
-        _id: "primary",
-        adminPin: data.adminPin,
-        adminPinEnvFingerprint: data.adminPinEnvFingerprint,
-        updatedAt: data.updatedAt,
-        legacyMigrationComplete: data.legacyMigrationComplete === true,
-        deletedCategories: data.deletedCategories,
-        deletedPoseKeys: data.deletedPoseKeys,
-      },
-      { upsert: true },
-    ),
-  ]);
+  ];
+  if (!data.galleryV300MigrationComplete) {
+    writes.push(syncMongoCollection(
+      mongoCollections.customPoses,
+      toPoseDocuments(data.customPoses, currentPoseIds),
+      previousData && toPoseDocuments(previousData.customPoses, previousPoseIds),
+    ));
+  }
+  await Promise.all(writes);
+  await mongoCollections.metadata.replaceOne(
+    { _id: "primary" },
+    {
+      _id: "primary",
+      adminPin: data.adminPin,
+      adminPinEnvFingerprint: data.adminPinEnvFingerprint,
+      updatedAt: data.updatedAt,
+      legacyMigrationComplete: data.legacyMigrationComplete === true,
+      deletedCategories: data.deletedCategories,
+      deletedPoseKeys: data.deletedPoseKeys,
+      galleryV300MigrationComplete: data.galleryV300MigrationComplete === true,
+      galleryV300BackupReference: data.galleryV300BackupReference,
+    },
+    { upsert: true },
+  );
 }
 
 async function loadMongoStore(): Promise<CloudDriveData> {
@@ -566,6 +576,8 @@ async function loadMongoStore(): Promise<CloudDriveData> {
     legacyMigrationComplete: metadata?.legacyMigrationComplete === true,
     deletedCategories: Array.isArray(metadata?.deletedCategories) ? metadata.deletedCategories : [],
     deletedPoseKeys: Array.isArray(metadata?.deletedPoseKeys) ? metadata.deletedPoseKeys : [],
+    galleryV300MigrationComplete: metadata?.galleryV300MigrationComplete === true,
+    galleryV300BackupReference: typeof metadata?.galleryV300BackupReference === "string" ? metadata.galleryV300BackupReference : undefined,
     users: users.map((document) => removeStorageFields(document) as unknown as StoredUser),
     photos: photos.map((document) => removeStorageFields(document) as unknown as CloudPhotoItem),
     records: records.map((document) => removeStorageFields(document) as unknown as UserCloudRecord),
@@ -632,6 +644,90 @@ async function initializeMongoStore(): Promise<CloudDriveData> {
 
   const loaded = await loadMongoStore();
   const normalized = normalizeCloudStore(initialData || loaded);
+  if (!normalized.galleryV300MigrationComplete) {
+    const backupReference = process.env.V3_GALLERY_BACKUP_REFERENCE?.trim();
+    if (MONGODB_URI && !backupReference) {
+      throw new Error("V3 gallery migration requires V3_GALLERY_BACKUP_REFERENCE after a full MongoDB Atlas backup has been exported.");
+    }
+    if (backupReference) {
+      const poseKeyMap = createLegacyPoseKeyMap(
+        [
+          { section: "kyyeu", categories: INITIAL_DATA_KYYEU },
+          { section: "canhan", categories: INITIAL_DATA_CANHAN },
+        ],
+        normalized.customPoses as Array<{ section: string; categoryId: string; pose: { id?: string } }>,
+      );
+      const validGalleryKeys = new Set<string>();
+      for (const [section, categories] of [["kyyeu", INITIAL_DATA_KYYEU], ["canhan", INITIAL_DATA_CANHAN]] as const) {
+        for (const category of categories) validGalleryKeys.add(categoryGalleryKey(section, category.id));
+      }
+      for (const item of normalized.customPoses) {
+        if ((item.section === "kyyeu" || item.section === "canhan") && item.categoryId) {
+          validGalleryKeys.add(categoryGalleryKey(item.section, item.categoryId));
+        }
+      }
+      for (const item of normalized.customCategories) {
+        if (item?.kind === "categoryGallery" && typeof item.galleryKey === "string") validGalleryKeys.add(item.galleryKey);
+      }
+      const galleryImages = new Map<string, Array<{ id: string; imageUrl?: string; sourcePoseId?: string; photoId?: string }>>();
+      const addLegacyImages = (section: string, categoryId: string, poses: Array<{ id?: string; coverImage?: string }>) => {
+        const key = categoryGalleryKey(section, categoryId);
+        const images = galleryImages.get(key) || [];
+        for (const pose of poses) {
+          if (!pose.coverImage) continue;
+          images.push({ id: `legacy:${pose.id || images.length}`, imageUrl: pose.coverImage, sourcePoseId: pose.id || "" });
+        }
+        galleryImages.set(key, images);
+      };
+      for (const [section, categories] of [["kyyeu", INITIAL_DATA_KYYEU], ["canhan", INITIAL_DATA_CANHAN]] as const) {
+        for (const category of categories) addLegacyImages(section, category.id, category.poses);
+      }
+      for (const item of normalized.customPoses) {
+        addLegacyImages(item.section, item.categoryId, [item.pose]);
+      }
+      const originalPhotoCount = normalized.photos.length;
+      const photoMigration = remapLegacyGalleryPhotos(normalized.photos, poseKeyMap, (photo) => {
+        const matchingPoseCover = normalized.records.find((record) =>
+          record.type === "setting" && record.data?.kind === "pose" && record.data.targetId === photo.poseKey
+        );
+        const deletedParent = normalized.deletedCategories.find((category) => category.poseKeys.includes(photo.poseKey));
+        const keySection = photo.poseKey.startsWith("canhan-") ? "canhan" : photo.poseKey.startsWith("kyyeu-") ? "kyyeu" : undefined;
+        const section = matchingPoseCover?.data?.sectionKey === "canhan" || matchingPoseCover?.data?.sectionKey === "kyyeu"
+          ? matchingPoseCover.data.sectionKey
+          : deletedParent?.section || keySection || "kyyeu";
+        return categoryGalleryKey(section, UNCATEGORIZED_CATEGORY_ID);
+      }, validGalleryKeys);
+      if (photoMigration.photos.length !== originalPhotoCount) {
+        throw new Error("[V3 Gallery Migration] Photo count changed while planning the migration; refusing to persist.");
+      }
+      if (photoMigration.unmappedCount > photoMigration.fallbackCount) {
+        throw new Error(`[V3 Gallery Migration] Refusing to migrate: ${photoMigration.unmappedCount - photoMigration.fallbackCount} photos were not mapped or assigned to fallback. Keep the Atlas backup and resolve these records before retrying.`);
+      }
+      for (const fallback of photoMigration.fallbackPhotos) {
+        console.warn(`[V3 Gallery Migration] Photo ${fallback.id} with unknown poseKey "${fallback.legacyPoseKey}" assigned to fallback gallery "${fallback.fallbackGalleryKey}"; legacyPoseKey retained.`);
+      }
+      normalized.photos = photoMigration.photos;
+      for (const [galleryKey, images] of galleryImages) {
+        const [, , section, categoryId] = galleryKey.split(":");
+        const id = `category-gallery:${section}:${categoryId}`;
+        const current = normalized.customCategories.findIndex((item) => item?.id === id);
+        const gallery = { id, kind: "categoryGallery", section, categoryId, galleryKey, images };
+        if (current >= 0) normalized.customCategories[current] = gallery;
+        else normalized.customCategories.push(gallery);
+        const completeImages = appendGalleryPhotoReferences(images, normalized.photos, galleryKey);
+        gallery.images = completeImages;
+        galleryImages.set(galleryKey, completeImages);
+        const photoCount = normalized.photos.filter((photo) => photo.poseKey === galleryKey).length;
+        const totalGalleryImages = images.filter((image) => !image.photoId).length + photoCount;
+        if (totalGalleryImages > 100) {
+          console.warn(`[V3 Gallery Migration] ${section}/${categoryId} has ${totalGalleryImages} existing images; all are being preserved. New uploads stay blocked until the gallery is below 100.`);
+        }
+      }
+      normalized.galleryV300MigrationComplete = true;
+      normalized.galleryV300BackupReference = backupReference || "local-development";
+      console.info(`[V3 Gallery Migration] Remapped ${photoMigration.remappedCount} cloud photos; assigned ${photoMigration.fallbackCount} unknown photos to the visible Uncategorized gallery; retained all custom_poses records.`);
+    }
+  }
   normalized.legacyMigrationComplete = true;
   await persistMongoStore(normalized);
   lastPersistedStore = structuredClone(normalized);
@@ -793,9 +889,10 @@ app.get("/api/cloud/status", (_req, res) => {
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
   const metadataOnly = _req.query.metadataOnly === "true";
-  const photos = cloudStore.photos.map(({ id, poseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
+  const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
     id,
     poseKey,
+    legacyPoseKey,
     ...(!metadataOnly ? { dataUrl } : {}),
     note,
     uploadedBy,
@@ -819,6 +916,18 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
   const photo = cloudStore.photos.find((item) => item.id === req.params.id);
   if (!photo) return res.status(404).json({ success: false, error: "Không tìm thấy ảnh" });
   res.json({ success: true, photo: { id: photo.id, dataUrl: photo.dataUrl } });
+});
+
+// Stable public image URL used by visual-search providers such as Google Lens.
+app.get("/api/cloud/photo/:id/image", (req, res) => {
+  const photo = cloudStore.photos.find((item) => item.id === req.params.id);
+  if (!photo) return res.status(404).send("Image not found");
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/.exec(photo.dataUrl || "");
+  if (!match) return res.status(415).send("Unsupported image data");
+  res.setHeader("Content-Type", match[1]);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(Buffer.from(match[2], "base64"));
 });
 
 const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com", "rednote.com"];
@@ -1153,6 +1262,20 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
     if (!poseKey || !dataUrl) {
       return res.status(400).json({ error: "Thiếu dữ liệu poseKey hoặc ảnh dataUrl" });
     }
+    if (typeof poseKey !== "string" || poseKey.length > 512) {
+      return res.status(400).json({ error: "Mã bộ sưu tập không hợp lệ" });
+    }
+    let storagePoseKey = poseKey;
+    if (cloudStore.galleryV300MigrationComplete && !poseKey.startsWith("category-gallery:v3:")) {
+      const legacyKeys = createLegacyPoseKeyMap(
+        [
+          { section: "kyyeu", categories: INITIAL_DATA_KYYEU },
+          { section: "canhan", categories: INITIAL_DATA_CANHAN },
+        ],
+        cloudStore.customPoses as Array<{ section: string; categoryId: string; pose: { id?: string } }>,
+      );
+      storagePoseKey = legacyKeys.get(poseKey) || poseKey;
+    }
     if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp|gif);base64,/i.test(dataUrl)) {
       return res.status(400).json({ error: "Ảnh không hợp lệ hoặc vượt quá dung lượng cho phép" });
     }
@@ -1172,6 +1295,14 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
       }
       return res.json({ success: true, photo: existingPhoto, duplicate: true });
     }
+    if (storagePoseKey.startsWith("category-gallery:v3:")) {
+      const galleryImages = cloudStore.customCategories.find((item) => item?.kind === "categoryGallery" && item.galleryKey === storagePoseKey)?.images;
+      const reservedImageCount = Array.isArray(galleryImages) ? galleryImages.filter((image: any) => !image.photoId).length : 0;
+      const uploadedImageCount = cloudStore.photos.filter((photo) => photo.poseKey === storagePoseKey).length;
+      if (reservedImageCount + uploadedImageCount >= 100) {
+        return res.status(409).json({ error: "Danh mục đã đạt giới hạn 100 ảnh. Hãy xóa bớt ảnh trước khi thêm." });
+      }
+    }
 
     const role = user.role;
 
@@ -1179,7 +1310,7 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
       id: `cloud_photo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
       ownerUserId: user.id,
       localPhotoId: typeof localPhotoId === "string" ? localPhotoId : undefined,
-      poseKey,
+      poseKey: storagePoseKey,
       dataUrl,
       note: note || "",
       uploadedBy: user.name || uploadedBy || "Thành viên",
@@ -1189,6 +1320,17 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
     };
 
     cloudStore.photos.unshift(newPhoto);
+    if (storagePoseKey.startsWith("category-gallery:v3:")) {
+      const [, , section, categoryId] = storagePoseKey.split(":");
+      const galleryId = `category-gallery:${section}:${categoryId}`;
+      let gallery = cloudStore.customCategories.find((item) => item?.id === galleryId);
+      if (!gallery) {
+        gallery = { id: galleryId, kind: "categoryGallery", section, categoryId, galleryKey: storagePoseKey, images: [] };
+        cloudStore.customCategories.push(gallery);
+      }
+      gallery.images ||= [];
+      gallery.images = appendGalleryPhotoReferences(gallery.images, [newPhoto], storagePoseKey);
+    }
     await saveStore();
 
     res.json({ success: true, photo: newPhoto });
@@ -1204,6 +1346,9 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
 app.post("/api/cloud/add-pose", asyncRoute(async (req, res) => {
   try {
     if (!requireUser(req, res)) return;
+    if (cloudStore.galleryV300MigrationComplete) {
+      return res.status(410).json({ error: "Phiên bản 3 lưu ảnh trực tiếp trong gallery của danh mục." });
+    }
     const { section, categoryId, pose } = req.body;
     if (!pose || !pose.id) {
       return res.status(400).json({ error: "Thiếu dữ liệu tư thế" });
@@ -1250,8 +1395,12 @@ function getTopicDeleteRequest(body: any): { section: "kyyeu" | "canhan"; catego
   if (!body || !["kyyeu", "canhan"].includes(body.section)) return null;
   if (typeof body.categoryId !== "string" || !body.categoryId.trim() || body.categoryId.length > 256) return null;
   if (!Array.isArray(body.poseKeys) || body.poseKeys.length > 500 ||
-    body.poseKeys.some((key: unknown) => typeof key !== "string" || key.length > 256)) return null;
-  return { section: body.section, categoryId: body.categoryId, poseKeys: [...new Set(body.poseKeys as string[])] };
+    body.poseKeys.some((key: unknown) => typeof key !== "string" || key.length > 512)) return null;
+  return {
+    section: body.section,
+    categoryId: body.categoryId,
+    poseKeys: [...new Set([...(body.poseKeys as string[]), categoryGalleryKey(body.section, body.categoryId)])],
+  };
 }
 
 function isTopicOwnedRecord(
@@ -1293,6 +1442,9 @@ app.post("/api/cloud/category/preview-delete", asyncRoute(async (req, res) => {
 
 app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
   if (!requireAdmin(req, res)) return;
+  if (req.params.id === UNCATEGORIZED_CATEGORY_ID) {
+    return res.status(400).json({ success: false, error: "Danh mục Chưa phân loại là danh mục hệ thống và không thể xóa." });
+  }
   const topic = getTopicDeleteRequest({ ...req.body, categoryId: req.params.id });
   if (!topic) return res.status(400).json({ success: false, error: "Thông tin chủ đề cần xóa không hợp lệ" });
 
@@ -1311,6 +1463,7 @@ app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
     !((item.section === topic.section && item.categoryId === topic.categoryId) || poseKeys.has(item.pose?.id))
   );
   cloudStore.customCategories = cloudStore.customCategories.filter((category) => category?.id !== topic.categoryId &&
+    category?.id !== `category-gallery:${topic.section}:${topic.categoryId}` &&
     !(category?.kind === "libraryRename" && category.section === topic.section && category.categoryId === topic.categoryId));
   cloudStore.records = cloudStore.records.filter((record) =>
     !isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
@@ -1331,6 +1484,9 @@ app.post("/api/cloud/library/rename", asyncRoute(async (req, res) => {
     (kind !== "section" && (typeof categoryId !== "string" || !categoryId)) ||
     (kind === "pose" && (typeof poseId !== "string" || !poseId))) {
     return res.status(400).json({ success: false, error: "Thông tin đổi tên không hợp lệ." });
+  }
+  if (kind === "category" && categoryId === UNCATEGORIZED_CATEGORY_ID) {
+    return res.status(400).json({ success: false, error: "Danh mục Chưa phân loại là danh mục hệ thống và không thể đổi tên." });
   }
   const nextLabel = label.trim();
   const renameKey = `rename:${kind}:${section}:${categoryId || ""}:${poseId || ""}`;
@@ -1391,6 +1547,11 @@ app.delete("/api/cloud/photo/:id", asyncRoute(async (req, res) => {
   const initialLen = cloudStore.photos.length;
   cloudStore.photos = cloudStore.photos.filter((p) => p.id !== id);
   if (cloudStore.photos.length !== initialLen) {
+    for (const gallery of cloudStore.customCategories) {
+      if (gallery?.kind === "categoryGallery" && Array.isArray(gallery.images)) {
+        gallery.images = gallery.images.filter((image: any) => image.photoId !== id);
+      }
+    }
     await saveStore();
   }
   res.json({ success: true });

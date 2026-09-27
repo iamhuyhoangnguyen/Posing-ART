@@ -1,4 +1,5 @@
 import { CategoryItem } from "../types";
+import { UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_LABEL } from "../utils/categoryGallery";
 
 export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
@@ -329,6 +330,13 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
     ],
   },
+  {
+    id: UNCATEGORIZED_CATEGORY_ID,
+    label: UNCATEGORIZED_CATEGORY_LABEL,
+    description: "Ảnh đang chờ xác định chủ đề gốc",
+    images: [],
+    poses: [],
+  },
 ];
 
 export const INITIAL_DATA_CANHAN: CategoryItem[] = [
@@ -499,5 +507,12 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
         angle: "Góc ngang tầm eo",
       },
     ],
+  },
+  {
+    id: UNCATEGORIZED_CATEGORY_ID,
+    label: UNCATEGORIZED_CATEGORY_LABEL,
+    description: "Ảnh đang chờ xác định chủ đề gốc",
+    images: [],
+    poses: [],
   },
 ];

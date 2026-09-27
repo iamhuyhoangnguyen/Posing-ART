@@ -1,15 +1,18 @@
 // Client-side Cloud Drive Sync manager
 // Coordinates synchronization between local IndexedDB and server-backed Cloud Drive
-import { getAllPhotos, addPhoto, openDatabase, updatePhotoCloudState, deletePhotosForPoses } from "./db";
+import { getAllPhotos, addPhoto, openDatabase, updatePhotoCloudState, deletePhotosForPoses, remapPhotosToCategoryGalleries } from "./db";
 import { getAdminToken } from "./adminAuth";
 import { getCurrentUser, refreshCurrentUserSession } from "./userAuth";
 import { serverUrl } from "../services/apiUrl";
 import { purgeLocalRecordsForTopic } from "../services/syncService";
+import { INITIAL_DATA_CANHAN, INITIAL_DATA_KYYEU } from "../data/posesData";
+import { createLegacyPoseKeyMap } from "./categoryGallery";
 
 export interface CloudPhotoItem {
   id: string;
   localPhotoId?: string;
   poseKey: string;
+  legacyPoseKey?: string;
   dataUrl?: string;
   note?: string;
   uploadedBy?: string;
@@ -120,6 +123,7 @@ export async function syncPendingLocalPhotos(): Promise<number> {
       );
       if (result.success && result.cloudId) {
         await updatePhotoCloudState(photo.id, syncId, result.cloudId);
+        window.dispatchEvent(new CustomEvent("cloud_photo_saved", { detail: { poseKey: photo.poseKey } }));
         uploaded += 1;
       }
     } catch (err) {
@@ -206,8 +210,24 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     connected = true;
 
     const cloudData: CloudSyncResponse = await res.json();
+    const legacyPoseKeyMap = createLegacyPoseKeyMap(
+      [
+        { section: "kyyeu", categories: INITIAL_DATA_KYYEU },
+        { section: "canhan", categories: INITIAL_DATA_CANHAN },
+      ],
+      cloudData.customPoses || [],
+    );
+    for (const photo of cloudData.photos || []) {
+      if (photo.legacyPoseKey && photo.poseKey.startsWith("category-gallery:v3:")) {
+        legacyPoseKeyMap.set(photo.legacyPoseKey, photo.poseKey);
+      }
+    }
+    await remapPhotosToCategoryGalleries(legacyPoseKeyMap);
     window.dispatchEvent(new CustomEvent("cloud_library_renames", {
       detail: { renames: (cloudData.customCategories || []).filter((item: any) => item?.kind === "libraryRename") },
+    }));
+    window.dispatchEvent(new CustomEvent("cloud_category_galleries_synced", {
+      detail: { galleries: (cloudData.customCategories || []).filter((item: any) => item?.kind === "categoryGallery") },
     }));
     totalCloudPhotos = cloudData.photos?.length || 0;
 

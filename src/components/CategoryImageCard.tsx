@@ -5,7 +5,7 @@ import { AdminItemActionsMenu } from "./AdminItemActionsMenu";
 
 interface CategoryImageCardProps {
   category: CategoryItem;
-  completedCount: number;
+  galleryImageCount?: number;
   isActive: boolean;
   onSelect: () => void;
   isAdmin?: boolean;
@@ -20,7 +20,7 @@ const FALLBACK_COVER = "https://images.unsplash.com/photo-1534528741775-53994a69
 /** Shared image-backed category selector used by both Kỷ Yếu and Concept. */
 export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
   category,
-  completedCount,
+  galleryImageCount = 0,
   isActive,
   onSelect,
   isAdmin = false,
@@ -56,14 +56,14 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
     />
 
     <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-[11px] font-bold text-white border border-white/15">
-      {completedCount}/{category.poses.length} dáng
+      {(category.images?.filter((image) => !image.photoId).length || 0) + galleryImageCount} ảnh
     </div>
     <div className="absolute bottom-3 left-3 right-3 text-white">
       <div className={`text-sm sm:text-base font-extrabold leading-tight ${isActive ? "text-amber-300" : "text-white"}`}>
         {category.label}
       </div>
       <div className="text-[11px] sm:text-xs text-zinc-200 line-clamp-2 mt-1 opacity-95">
-        {category.description || `${category.poses.length} gợi ý tạo dáng để bạn tham khảo`}
+        {category.description || `${category.images?.filter((image) => !image.photoId).length || 0} ảnh để bạn tham khảo`}
       </div>
     </div>
   </button>

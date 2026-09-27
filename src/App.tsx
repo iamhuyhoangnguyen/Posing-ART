@@ -23,15 +23,13 @@ import {
   FileImage,
   ChevronDown,
 } from "lucide-react";
-import { CategoryItem, FilterStatus, PoseItem, SectionType } from "./types";
+import { CategoryItem, FilterStatus, PhotoRecord, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
 import { getPhotoCounts, deletePhotosForPoses, getPhotosForPose } from "./utils/db";
 import { Header } from "./components/Header";
-import { PoseCard } from "./components/PoseCard";
 import { CategoryImageCard } from "./components/CategoryImageCard";
+import { GalleryImageCard } from "./components/GalleryImageCard";
 import { OfflineImage } from "./components/OfflineImage";
-import type { ReferenceSheetPose } from "./components/ReferenceSheetModal";
-import type { LibraryPoseEntry } from "./components/HomeLibraryTools";
 const PoseModal = lazy(() => import("./components/PoseModal").then((module) => ({ default: module.PoseModal })));
 const AIPoseAdvisorModal = lazy(() => import("./components/AIPoseAdvisorModal").then((module) => ({ default: module.AIPoseAdvisorModal })));
 const BackupModal = lazy(() => import("./components/BackupModal").then((module) => ({ default: module.BackupModal })));
@@ -39,19 +37,20 @@ const AddCustomPoseModal = lazy(() => import("./components/AddCustomPoseModal").
 const EditCoverModal = lazy(() => import("./components/EditCoverModal").then((module) => ({ default: module.EditCoverModal })));
 const InstallGuideModal = lazy(() => import("./components/InstallGuideModal").then((module) => ({ default: module.InstallGuideModal })));
 const PersonalModal = lazy(() => import("./components/PersonalModal").then((module) => ({ default: module.PersonalModal })));
-const ReferenceSheetModal = lazy(() => import("./components/ReferenceSheetModal").then((module) => ({ default: module.ReferenceSheetModal })));
 const CategoryDeleteConfirmModal = lazy(() => import("./components/CategoryDeleteConfirmModal").then((module) => ({ default: module.CategoryDeleteConfirmModal })));
 const HomeLibraryTools = lazy(() => import("./components/HomeLibraryTools").then((module) => ({ default: module.HomeLibraryTools })));
-import { AddIdeaCard } from "./components/AddIdeaCard";
 import { InspirationBar } from "./components/InspirationBar";
+import { AddIdeaCard } from "./components/AddIdeaCard";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
 import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
-import { deleteCategoryFromCloud, deletePoseFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
+import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
+import { categoryGalleryKey, UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_LABEL } from "./utils/categoryGallery";
+import { serverUrl } from "./services/apiUrl";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -76,7 +75,18 @@ interface CategoryDeleteCandidate {
 
 function filterDeletedCategories(section: "kyyeu" | "canhan", categories: CategoryItem[]): CategoryItem[] {
   const deleted = getDeletedCategoryKeys();
-  return categories.filter((category) => !deleted.has(`${section}:${category.id}`));
+  return categories.filter((category) => category.id === UNCATEGORIZED_CATEGORY_ID || !deleted.has(`${section}:${category.id}`));
+}
+
+function ensureUncategorizedCategory(section: "kyyeu" | "canhan", categories: CategoryItem[]): CategoryItem[] {
+  const fallback = (section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN)
+    .find((category) => category.id === UNCATEGORIZED_CATEGORY_ID);
+  if (!fallback) return categories;
+  const existing = categories.find((category) => category.id === UNCATEGORIZED_CATEGORY_ID);
+  const fixedCategory = existing
+    ? { ...fallback, label: UNCATEGORIZED_CATEGORY_LABEL, images: existing.images || fallback.images }
+    : fallback;
+  return [...categories.filter((category) => category.id !== UNCATEGORIZED_CATEGORY_ID), fixedCategory];
 }
 
 function readRecentPoseViews(): RecentPoseView[] {
@@ -102,10 +112,16 @@ function applyCategoryRenames(categories: CategoryItem[], section: "kyyeu" | "ca
   try { deletedPoseKeys = JSON.parse(localStorage.getItem("posing_deleted_pose_keys") || "[]"); } catch { /* Ignore malformed local tombstones. */ }
   const deleted = new Set(deletedPoseKeys);
   return categories.map((category) => {
-    const categoryRename = renames.find((item) => item.targetKind === "category" && item.section === section && item.categoryId === category.id);
+    const categoryRename = category.id === UNCATEGORIZED_CATEGORY_ID ? undefined :
+      renames.find((item) => item.targetKind === "category" && item.section === section && item.categoryId === category.id);
     return {
       ...category,
       label: categoryRename?.label || category.label,
+      images: category.images?.length ? category.images : category.poses.filter((pose) => Boolean(pose.coverImage)).map((pose) => ({
+        id: `legacy:${pose.id}`,
+        imageUrl: pose.coverImage!,
+        sourcePoseId: pose.id,
+      })),
       poses: category.poses.filter((pose) => !deleted.has(pose.id)).map((pose) => {
         const poseRename = renames.find((item) => item.targetKind === "pose" && item.section === section && item.categoryId === category.id && item.poseId === pose.id);
         return poseRename ? { ...pose, title: poseRename.label } : pose;
@@ -169,12 +185,12 @@ export default function App() {
         const filtered = parsed.filter(
           (c) => c.id !== "kyyeu-nam" && !c.label.toLowerCase().includes("đơn nam")
         );
-        return applyCategoryRenames(filterDeletedCategories("kyyeu", filtered), "kyyeu", renames);
+        return applyCategoryRenames(ensureUncategorizedCategory("kyyeu", filterDeletedCategories("kyyeu", filtered)), "kyyeu", renames);
       } catch (e) {
         console.error(e);
       }
     }
-    return applyCategoryRenames(filterDeletedCategories("kyyeu", INITIAL_DATA_KYYEU), "kyyeu", renames);
+    return applyCategoryRenames(ensureUncategorizedCategory("kyyeu", filterDeletedCategories("kyyeu", INITIAL_DATA_KYYEU)), "kyyeu", renames);
   });
 
   const [canhanData, setCanhanData] = useState<CategoryItem[]>(() => {
@@ -182,12 +198,12 @@ export default function App() {
     const saved = localStorage.getItem("canhan-data-v1");
     if (saved) {
       try {
-        return applyCategoryRenames(filterDeletedCategories("canhan", JSON.parse(saved)), "canhan", renames);
+        return applyCategoryRenames(ensureUncategorizedCategory("canhan", filterDeletedCategories("canhan", JSON.parse(saved))), "canhan", renames);
       } catch (e) {
         console.error(e);
       }
     }
-    return applyCategoryRenames(filterDeletedCategories("canhan", INITIAL_DATA_CANHAN), "canhan", renames);
+    return applyCategoryRenames(ensureUncategorizedCategory("canhan", filterDeletedCategories("canhan", INITIAL_DATA_CANHAN)), "canhan", renames);
   });
   const [sectionNames, setSectionNames] = useState<{ kyyeu: string; canhan: string }>(() => {
     const renames = readLibraryRenames();
@@ -201,8 +217,6 @@ export default function App() {
   const [activeKyyeuCatIdx, setActiveKyyeuCatIdx] = useState(0);
   const [activeCanhanCatIdx, setActiveCanhanCatIdx] = useState(0);
   const [isCategoryDetailOpen, setIsCategoryDetailOpen] = useState(false);
-  const [isSelectingSheetPoses, setIsSelectingSheetPoses] = useState(false);
-  const [referenceSheetPoses, setReferenceSheetPoses] = useState<ReferenceSheetPose[]>([]);
   const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
   // Search query & filter status
@@ -213,6 +227,8 @@ export default function App() {
 
   // Photo counts map from IndexedDB
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
+  const [flatGalleryPhotos, setFlatGalleryPhotos] = useState<PhotoRecord[]>([]);
+  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
 
   // Modals state
   const [activePoseModal, setActivePoseModal] = useState<{
@@ -230,17 +246,12 @@ export default function App() {
 
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showReferenceSheet, setShowReferenceSheet] = useState(false);
   const [categoryDeleteCandidate, setCategoryDeleteCandidate] = useState<CategoryDeleteCandidate | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [categoryDeleteError, setCategoryDeleteError] = useState("");
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
-  const [customModalConfig, setCustomModalConfig] = useState<{
-    isOpen: boolean;
-    categoryId?: string;
-    mode?: "pose" | "category";
-  }>({ isOpen: false });
+  const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [canInstallPwa, setCanInstallPwa] = useState(false);
@@ -298,12 +309,6 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [recentPoseViews]);
-
-  const toggleReferenceSheetPose = (pose: PoseItem, categoryName: string, key: string) => {
-    setReferenceSheetPoses((selected) => selected.some((item) => item.key === key)
-      ? selected.filter((item) => item.key !== key)
-      : [...selected, { key, title: pose.title, categoryName, imageUrl: pose.coverImage }]);
-  };
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -510,10 +515,19 @@ export default function App() {
       applySyncedCoverImages();
       setDoneVersion((version) => version + 1);
     };
+    const mergeCategoryGalleries = (event: Event) => {
+      const galleries = (event as CustomEvent<{ galleries?: Array<{ section?: string; categoryId?: string; images?: CategoryItem["images"] }> }>).detail?.galleries || [];
+      const update = (categories: CategoryItem[], section: "kyyeu" | "canhan") => categories.map((category) => {
+        const gallery = galleries.find((item) => item.section === section && item.categoryId === category.id);
+        return gallery && Array.isArray(gallery.images) ? { ...category, images: gallery.images } : category;
+      });
+      setKyyeuData((categories) => update(categories, "kyyeu"));
+      setCanhanData((categories) => update(categories, "canhan"));
+    };
     const removeDeletedCategories = () => {
       const deleted = getDeletedCategoryKeys();
-      setKyyeuData((categories) => categories.filter((category) => !deleted.has(`kyyeu:${category.id}`)));
-      setCanhanData((categories) => categories.filter((category) => !deleted.has(`canhan:${category.id}`)));
+      setKyyeuData((categories) => ensureUncategorizedCategory("kyyeu", categories.filter((category) => category.id === UNCATEGORIZED_CATEGORY_ID || !deleted.has(`kyyeu:${category.id}`))));
+      setCanhanData((categories) => ensureUncategorizedCategory("canhan", categories.filter((category) => category.id === UNCATEGORIZED_CATEGORY_ID || !deleted.has(`canhan:${category.id}`))));
       const removedPoseKeys = new Set(
         (JSON.parse(localStorage.getItem("posing_deleted_categories") || "[]") as Array<{ poseKeys?: string[] }>)
           .flatMap((category) => category.poseKeys || [])
@@ -521,7 +535,6 @@ export default function App() {
       const updatedViews = readRecentPoseViews().filter((item) => !removedPoseKeys.has(item.poseKey));
       localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
       setRecentPoseViews(updatedViews);
-      setReferenceSheetPoses((selected) => selected.filter((item) => !removedPoseKeys.has(item.key)));
       setDoneVersion((version) => version + 1);
     };
     const removeDeletedPoses = (event: Event) => {
@@ -534,14 +547,15 @@ export default function App() {
       const updatedViews = readRecentPoseViews().filter((item) => !deleted.has(item.poseKey));
       localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
       setRecentPoseViews(updatedViews);
-      setReferenceSheetPoses((items) => items.filter((item) => !deleted.has(item.key)));
       setDoneVersion((version) => version + 1);
     };
     window.addEventListener("cloud_records_synced", refreshSyncedProgress);
+    window.addEventListener("cloud_category_galleries_synced", mergeCategoryGalleries);
     window.addEventListener("cloud_categories_synced", removeDeletedCategories);
     window.addEventListener("cloud_poses_synced", removeDeletedPoses);
     return () => {
       window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
+      window.removeEventListener("cloud_category_galleries_synced", mergeCategoryGalleries);
       window.removeEventListener("cloud_categories_synced", removeDeletedCategories);
       window.removeEventListener("cloud_poses_synced", removeDeletedPoses);
     };
@@ -549,29 +563,12 @@ export default function App() {
 
   // Stats calculation
   const stats = useMemo(() => {
-    let kyyeuTotal = 0;
-    let kyyeuCompleted = 0;
-    kyyeuData.forEach((cat, cIdx) => {
-      cat.poses.forEach((pose, pIdx) => {
-        kyyeuTotal++;
-        const key = pose.id || `kyyeu-${cIdx}-${pIdx}`;
-        if (localStorage.getItem(`done-${key}`) === "true") {
-          kyyeuCompleted++;
-        }
-      });
-    });
-
-    let canhanTotal = 0;
-    let canhanCompleted = 0;
-    canhanData.forEach((cat, cIdx) => {
-      cat.poses.forEach((pose, pIdx) => {
-        canhanTotal++;
-        const key = pose.id || `canhan-${cIdx}-${pIdx}`;
-        if (localStorage.getItem(`done-${key}`) === "true") {
-          canhanCompleted++;
-        }
-      });
-    });
+    const countImages = (categories: CategoryItem[], section: "kyyeu" | "canhan") => categories.reduce((count, category) =>
+      count + (category.images?.filter((image) => !image.photoId).length || 0) + (photoCounts[categoryGalleryKey(section, category.id)] || 0), 0);
+    const kyyeuTotal = countImages(kyyeuData, "kyyeu");
+    const canhanTotal = countImages(canhanData, "canhan");
+    const kyyeuCompleted = 0;
+    const canhanCompleted = 0;
 
     const totalPhotos = Object.values(photoCounts).reduce((a, b) => a + b, 0);
 
@@ -584,46 +581,14 @@ export default function App() {
       totalCompleted: kyyeuCompleted + canhanCompleted,
       totalPhotos,
     };
-  }, [kyyeuData, canhanData, doneVersion, photoCounts]);
+  }, [kyyeuData, canhanData, photoCounts]);
 
   // Current active categories and poses
   const currentCategories = currentSection === "kyyeu" ? kyyeuData : canhanData;
   const currentCatIdx = currentSection === "kyyeu" ? activeKyyeuCatIdx : activeCanhanCatIdx;
   const currentCategory = currentCategories[currentCatIdx] || currentCategories[0];
-
-  const libraryPoses = useMemo<LibraryPoseEntry[]>(() => [
-    ...kyyeuData.flatMap((category, categoryIndex) => category.poses.map((pose, poseIndex) => ({
-      pose,
-      section: "kyyeu" as const,
-      category,
-      categoryIndex,
-      poseKey: pose.id || `kyyeu-${categoryIndex}-${poseIndex}`,
-    }))),
-    ...canhanData.flatMap((category, categoryIndex) => category.poses.map((pose, poseIndex) => ({
-      pose,
-      section: "canhan" as const,
-      category,
-      categoryIndex,
-      poseKey: pose.id || `canhan-${categoryIndex}-${poseIndex}`,
-    }))),
-  ], [kyyeuData, canhanData]);
-
-  const recordPoseView = (poseKey: string) => {
-    const updated = [{ poseKey, viewedAt: Date.now() }, ...readRecentPoseViews().filter((item) => item.poseKey !== poseKey)].slice(0, 20);
-    localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updated));
-    setRecentPoseViews(updated);
-  };
-
-  const openLibraryPose = (entry: LibraryPoseEntry) => {
-    setCurrentSection(entry.section);
-    if (entry.section === "kyyeu") setActiveKyyeuCatIdx(entry.categoryIndex);
-    else setActiveCanhanCatIdx(entry.categoryIndex);
-    setIsCategoryDetailOpen(true);
-    setSearchQuery("");
-    setFilterStatus("all");
-    setActivePoseModal({ pose: entry.pose, categoryName: entry.category.label, poseKey: entry.poseKey });
-    recordPoseView(entry.poseKey);
-  };
+  const currentCategoryMatchesSearch = !searchQuery.trim() || Boolean(currentCategory &&
+    currentCategory.label.toLocaleLowerCase("vi-VN").includes(searchQuery.trim().toLocaleLowerCase("vi-VN")));
 
   const openLibraryCategory = (section: "kyyeu" | "canhan", categoryIndex: number) => {
     setCurrentSection(section);
@@ -636,37 +601,47 @@ export default function App() {
 
 
   // Filtered poses
-  const displayedPoses = useMemo(() => {
-    if (!currentCategory) return [];
+  const displayedGalleryImages = useMemo(() => {
+    if (!currentCategory || !currentCategoryMatchesSearch) return [];
+    return currentCategory.images || [];
+  }, [currentCategory, currentCategoryMatchesSearch]);
 
-    let list = currentCategory.poses;
-
-    // Search query filter
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const categoryMatches = `${currentCategory.label} ${currentCategory.description || ""}`.toLowerCase().includes(q);
-      if (!categoryMatches) {
-        list = list.filter(
-          (p) =>
-            p.title.toLowerCase().includes(q) ||
-            p.desc?.toLowerCase().includes(q) ||
-            p.angle?.toLowerCase().includes(q) ||
-            p.tips?.some((t) => t.toLowerCase().includes(q))
-        );
-      }
+  const galleryKey = currentCategory && (currentSection === "kyyeu" || currentSection === "canhan")
+    ? categoryGalleryKey(currentSection, currentCategory.id)
+    : "";
+  useEffect(() => {
+    let cancelled = false;
+    if (!galleryKey || !isCategoryDetailOpen) {
+      setFlatGalleryPhotos([]);
+      return;
     }
+    void getPhotosForPose(galleryKey).then((photos) => { if (!cancelled) setFlatGalleryPhotos(photos); });
+    return () => { cancelled = true; };
+  }, [galleryKey, isCategoryDetailOpen, currentCategory?.images]);
+  useEffect(() => {
+    if (!galleryKey) return;
+    const refresh = () => { void getPhotosForPose(galleryKey).then(setFlatGalleryPhotos); };
+    window.addEventListener("cloud_photo_saved", refresh);
+    return () => window.removeEventListener("cloud_photo_saved", refresh);
+  }, [galleryKey]);
+  const refreshCategoryGalleryPhotos = async () => {
+    await refreshPhotoCounts();
+    if (galleryKey) setFlatGalleryPhotos(await getPhotosForPose(galleryKey));
+  };
+  const galleryPhotoUrls = useMemo(() => flatGalleryPhotos.map((photo) => ({
+    photo,
+    url: URL.createObjectURL(photo.blob),
+  })), [flatGalleryPhotos]);
+  useEffect(() => () => galleryPhotoUrls.forEach(({ url }) => URL.revokeObjectURL(url)), [galleryPhotoUrls]);
 
-    // Status filter
-    if (filterStatus !== "all") {
-      list = list.filter((p, idx) => {
-        const key = p.id || `${currentSection}-${currentCatIdx}-${idx}`;
-        const isDone = localStorage.getItem(`done-${key}`) === "true";
-        return filterStatus === "completed" ? isDone : !isDone;
-      });
-    }
-
-    return list;
-  }, [currentCategory, searchQuery, filterStatus, currentSection, currentCatIdx, doneVersion]);
+  const openCategoryGallery = () => {
+    if (!currentCategory || !galleryKey) return;
+    setActivePoseModal({
+      pose: { id: galleryKey, title: currentCategory.label, desc: "", tips: [] },
+      categoryName: currentCategory.label,
+      poseKey: galleryKey,
+    });
+  };
 
   // Actions
   const handleToggleDone = (poseKey: string) => {
@@ -693,21 +668,9 @@ export default function App() {
     setDoneVersion((v) => v + 1);
   };
 
-  const handleAddPose = (section: "kyyeu" | "canhan", catId: string, newPose: PoseItem) => {
-    const updater = section === "kyyeu" ? setKyyeuData : setCanhanData;
-    updater((prev) =>
-      prev.map((c) => {
-        if (c.id === catId) {
-          return { ...c, poses: [newPose, ...c.poses] };
-        }
-        return c;
-      })
-    );
-  };
-
   const handleAddCategory = (section: "kyyeu" | "canhan", newCat: CategoryItem) => {
     const updater = section === "kyyeu" ? setKyyeuData : setCanhanData;
-    updater((prev) => [...prev, newCat]);
+    updater((prev) => [...prev, { ...newCat, images: newCat.images || [] }]);
   };
 
   const saveLibraryRename = async (rename: Omit<LibraryRename, "id" | "kind">) => {
@@ -745,14 +708,6 @@ export default function App() {
     void saveLibraryRename({ targetKind: "category", section, categoryId: category.id, label: nextName });
   };
 
-  const promptRenamePose = (section: "kyyeu" | "canhan", category: CategoryItem, pose: PoseItem) => {
-    if (!isCurrentUserAdmin()) return;
-    const nextName = window.prompt("Nhập tên dáng mới:", pose.title)?.trim();
-    if (!nextName || nextName === pose.title) return;
-    if (category.poses.some((item) => item.id !== pose.id && item.title.trim().toLocaleLowerCase("vi-VN") === nextName.toLocaleLowerCase("vi-VN"))) return window.alert("Tên này đã được sử dụng trong cùng danh mục.");
-    void saveLibraryRename({ targetKind: "pose", section, categoryId: category.id, poseId: pose.id, label: nextName });
-  };
-
   const shareLibraryItem = async (title: string, description: string) => {
     const shareData = { title, text: description, url: window.location.href };
     try {
@@ -766,52 +721,33 @@ export default function App() {
     }
   };
 
-  const downloadPosePhotos = async (poses: PoseItem[], section: "kyyeu" | "canhan", categoryIndex: number, label: string) => {
-    const photos: Array<{ pose: PoseItem; blob: Blob; index: number }> = [];
-    for (const pose of poses) {
-      const poseIndex = (section === "kyyeu" ? kyyeuData : canhanData)[categoryIndex]?.poses.findIndex((item) => item.id === pose.id) ?? 0;
-      const poseKey = pose.id || `${section}-${categoryIndex}-${poseIndex}`;
-      const posePhotos = await getPhotosForPose(poseKey);
-      posePhotos.forEach((photo, index) => photos.push({ pose, blob: photo.blob, index: index + 1 }));
+  const downloadCategoryPhotos = async (section: "kyyeu" | "canhan", category: CategoryItem) => {
+    const key = categoryGalleryKey(section, category.id);
+    const storedPhotos = await getPhotosForPose(key);
+    const photos: Array<{ blob: Blob; name: string }> = storedPhotos.map((photo, index) => ({
+      blob: photo.blob,
+      name: `${category.label}-anh-${index + 1}`,
+    }));
+    for (const [index, image] of (category.images || []).filter((item) => !item.photoId).entries()) {
+      if (!image.imageUrl) continue;
+      try {
+        const response = await fetch(image.imageUrl);
+        if (!response.ok) continue;
+        photos.push({ blob: await response.blob(), name: `${category.label}-mau-${index + 1}` });
+      } catch { /* Remote reference images may disallow cross-origin downloads. */ }
     }
-    if (!photos.length) return window.alert("Mục này chưa có ảnh tham khảo để tải xuống.");
+    if (!photos.length) return window.alert("Danh mục này chưa có ảnh có thể tải xuống.");
     for (const [index, item] of photos.entries()) {
       const extension = item.blob.type.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-      await saveImageToDevice(item.blob, `${label}-${item.pose.title}-${item.index}.${extension}`.replace(/[\\/:*?"<>|]/g, "-"));
+      await saveImageToDevice(item.blob, `${item.name}.${extension}`.replace(/[\\/:*?"<>|]/g, "-"));
       if (index < photos.length - 1) await new Promise((resolve) => setTimeout(resolve, 250));
     }
     window.alert(`Đã gửi ${photos.length} ảnh tới thư mục tải xuống.`);
   };
 
-  const requestPoseDeletion = async (section: "kyyeu" | "canhan", category: CategoryItem, categoryIndex: number, pose: PoseItem) => {
-    if (!isCurrentUserAdmin()) return;
-    const poseIndex = category.poses.findIndex((item) => item.id === pose.id);
-    const poseKey = pose.id || `${section}-${categoryIndex}-${poseIndex}`;
-    try {
-      const preview = await previewCategoryDeletion({ section, categoryId: category.id, poseKeys: [poseKey] });
-      const localPhotoCount = (await getPhotosForPose(poseKey)).length;
-      const confirmed = window.confirm(`Xóa vĩnh viễn “${pose.title}”? Thao tác này sẽ xóa ${preview.photoCount} ảnh Cloud Drive, ${localPhotoCount} ảnh cục bộ trên thiết bị này và ${preview.customPoseCount} bản ghi dáng. Không thể hoàn tác.`);
-      if (!confirmed) return;
-      await deletePoseFromCloud({ section, categoryId: category.id, poseKey });
-      await deletePhotosForPoses([poseKey]);
-      if (section === "kyyeu") setKyyeuData((categories) => categories.map((item) => item.id === category.id ? { ...item, poses: item.poses.filter((entry) => entry.id !== pose.id) } : item));
-      else setCanhanData((categories) => categories.map((item) => item.id === category.id ? { ...item, poses: item.poses.filter((entry) => entry.id !== pose.id) } : item));
-      localStorage.setItem("posing_deleted_pose_keys", JSON.stringify([...new Set([...JSON.parse(localStorage.getItem("posing_deleted_pose_keys") || "[]"), poseKey])]));
-      localStorage.removeItem(`done-${poseKey}`);
-      const updatedViews = readRecentPoseViews().filter((item) => item.poseKey !== poseKey);
-      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
-      setRecentPoseViews(updatedViews);
-      setReferenceSheetPoses((items) => items.filter((item) => item.key !== poseKey));
-      if (activePoseModal?.poseKey === poseKey) setActivePoseModal(null);
-      await refreshPhotoCounts();
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Không thể xóa dáng. Vui lòng thử lại.");
-    }
-  };
-
   const handleDataRestored = (newKyyeu: CategoryItem[], newCanhan: CategoryItem[]) => {
-    setKyyeuData(newKyyeu);
-    setCanhanData(newCanhan);
+      setKyyeuData(applyCategoryRenames(ensureUncategorizedCategory("kyyeu", newKyyeu), "kyyeu", readLibraryRenames()));
+      setCanhanData(applyCategoryRenames(ensureUncategorizedCategory("canhan", newCanhan), "canhan", readLibraryRenames()));
     const kCover = localStorage.getItem("cover-section-kyyeu");
     if (kCover) setKyyeuCover(kCover);
     const cCover = localStorage.getItem("cover-section-canhan");
@@ -821,10 +757,12 @@ export default function App() {
   };
 
   const handleRestoreDefaultData = () => {
-    setKyyeuData(INITIAL_DATA_KYYEU);
-    setCanhanData(INITIAL_DATA_CANHAN);
-    localStorage.setItem("kyyeu-data-v1", JSON.stringify(INITIAL_DATA_KYYEU));
-    localStorage.setItem("canhan-data-v1", JSON.stringify(INITIAL_DATA_CANHAN));
+    const kyyeu = applyCategoryRenames(INITIAL_DATA_KYYEU, "kyyeu", readLibraryRenames());
+    const canhan = applyCategoryRenames(INITIAL_DATA_CANHAN, "canhan", readLibraryRenames());
+    setKyyeuData(kyyeu);
+    setCanhanData(canhan);
+    localStorage.setItem("kyyeu-data-v1", JSON.stringify(kyyeu));
+    localStorage.setItem("canhan-data-v1", JSON.stringify(canhan));
   };
 
   // Save Cover Image Handler
@@ -891,7 +829,8 @@ export default function App() {
 
   const requestCategoryDeletion = async (section: "kyyeu" | "canhan", category: CategoryItem, categoryIndex: number) => {
     if (!isCurrentUserAdmin()) return;
-    const poseKeys = category.poses.map((pose, poseIndex) => pose.id || `${section}-${categoryIndex}-${poseIndex}`);
+    const galleryKey = categoryGalleryKey(section, category.id);
+    const poseKeys = [...category.poses.map((pose, poseIndex) => pose.id || `${section}-${categoryIndex}-${poseIndex}`), galleryKey];
     const localPhotoCount = poseKeys.reduce((count, key) => count + (photoCounts[key] || 0), 0);
     setCategoryDeleteError("");
     try {
@@ -930,7 +869,6 @@ export default function App() {
       const updatedViews = readRecentPoseViews().filter((item) => !keySet.has(item.poseKey));
       localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
       setRecentPoseViews(updatedViews);
-      setReferenceSheetPoses((selected) => selected.filter((item) => !keySet.has(item.key)));
       setIsCategoryDetailOpen(false);
       setCategoryDeleteCandidate(null);
       setDoneVersion((version) => version + 1);
@@ -980,7 +918,7 @@ export default function App() {
             : "Trợ Lý Sáng Tạo 3 Siêu AI: ChatGPT • Gemini • Claude"
         }
         showBack={currentSection !== "home"}
-        showProgressAndFilters={currentSection !== "canhan" && currentSection !== "kyyeu"}
+        showProgressAndFilters={false}
         onBackToHome={returnToHome}
         completedCount={
           currentSection === "kyyeu"
@@ -999,7 +937,6 @@ export default function App() {
         filterStatus={filterStatus}
         onFilterChange={setFilterStatus}
         onOpenBackup={() => setShowBackupModal(true)}
-        onOpenAddCustom={() => setCustomModalConfig({ isOpen: true, mode: "pose" })}
         onOpenInstallGuide={() => setShowInstallModal(true)}
         onOpenSettings={() => setShowPersonalModal(true)}
         onOpenPersonal={() => setShowPersonalModal(true)}
@@ -1025,7 +962,7 @@ export default function App() {
                   type="text"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={`Tìm dáng, góc máy hoặc mẹo ${currentSection === "kyyeu" ? "kỷ yếu" : "concept"}...`}
+                  placeholder={`Tìm tên ${currentSection === "kyyeu" ? "danh mục" : "chủ đề"}...`}
                   className="w-full pl-10 pr-12 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 outline-none focus:border-amber-500 shadow-sm transition-all"
                 />
                 {searchQuery && (
@@ -1039,38 +976,13 @@ export default function App() {
                 )}
               </div>
             )}
-            {isCategoryDetailOpen && (
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none" aria-label="Gợi ý tìm kiếm nhanh">
-                {[
-                  { label: "Dáng đứng", query: "đứng" },
-                  { label: "Dáng ngồi", query: "ngồi" },
-                  { label: "Concept vintage", query: "vintage" },
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion.query}
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery(suggestion.query);
-                      setFilterStatus("all");
-                    }}
-                    className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                      searchQuery.toLowerCase() === suggestion.query
-                        ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                        : "border-zinc-200 bg-white text-zinc-600 hover:border-amber-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-                    }`}
-                  >
-                    {suggestion.label}
-                  </button>
-                ))}
-              </div>
-            )}
             {currentCategory && isCategoryDetailOpen && (
               <InspirationBar
                 key={currentCategory.id}
                 categoryId={currentCategory.id}
                 categoryLabel={currentCategory.label}
                 categoryDescription={currentCategory.description}
-                poseTitles={currentCategory.poses.map((pose) => pose.title)}
+                poseTitles={[]}
               />
             )}
             {isCategoryDetailOpen && currentCategory && (
@@ -1093,25 +1005,6 @@ export default function App() {
 
               </section>
             )}
-            {currentCategory && isCategoryDetailOpen && (
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {isSelectingSheetPoses ? "Chạm các dáng muốn đưa vào tờ tham khảo" : "Có thể chọn dáng từ nhiều chủ đề"}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setIsSelectingSheetPoses((active) => !active)}
-                  aria-pressed={isSelectingSheetPoses}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold ${
-                    isSelectingSheetPoses
-                      ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                      : "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
-                  }`}
-                >
-                  <ListChecks className="h-3.5 w-3.5" /> {isSelectingSheetPoses ? "Xong chọn" : "Chọn dáng"}
-                </button>
-              </div>
-            )}
           </div>
         )}
 
@@ -1127,10 +1020,10 @@ export default function App() {
             >
               <div>
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-zinc-900 dark:text-zinc-50">
-                  Khám Phá Dáng Chụp
+                  Khám Phá Thư Viện Ảnh
                 </h1>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Bộ sưu tập tư thế tạo dáng chuẩn & trợ lý AI hỗ trợ buổi chụp
+                  Ảnh tham khảo theo danh mục, kèm trợ lý AI hỗ trợ buổi chụp
                 </p>
               </div>
 
@@ -1149,9 +1042,6 @@ export default function App() {
             <HomeLibraryTools
               kyyeuCategories={kyyeuData}
               canhanCategories={canhanData}
-              poses={libraryPoses}
-              recentPoseKeys={recentPoseViews.map((item) => item.poseKey)}
-              onOpenPose={openLibraryPose}
               onOpenCategory={openLibraryCategory}
             />
 
@@ -1203,7 +1093,7 @@ export default function App() {
                 {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("kyyeu"); }} aria-label="Đổi tên Phần 1" title="Đổi tên Phần 1" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
-                  {stats.kyyeuCompleted} / {stats.kyyeuTotal} dáng
+                  {stats.kyyeuTotal} ảnh
                 </div>
 
                 <div className="absolute bottom-0 left-0 right-0 p-5 text-white flex items-end justify-between">
@@ -1271,7 +1161,7 @@ export default function App() {
                 {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("canhan"); }} aria-label="Đổi tên Phần 2" title="Đổi tên Phần 2" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
-                  {stats.canhanCompleted} / {stats.canhanTotal} dáng
+                  {stats.canhanTotal} ảnh
                 </div>
 
                 <div className="absolute bottom-0 left-0 right-0 p-5 text-white flex items-end justify-between">
@@ -1396,13 +1286,10 @@ export default function App() {
                 <AddIdeaCard
                   isHomeSection
                   title="Thêm Ý Tưởng Concept Mới"
-                  subtitle="Bấm để tạo thêm danh mục hoặc dáng chụp riêng theo phong cách của bạn"
+                  subtitle="Tạo thêm danh mục ảnh tham khảo theo phong cách của bạn"
                   badgeText="+ Thêm concept mới"
                   onClick={() => {
-                    setCustomModalConfig({
-                      isOpen: true,
-                      mode: "category",
-                    });
+                    setCustomModalConfig({ isOpen: true });
                   }}
                 />
               </motion.div>
@@ -1467,9 +1354,7 @@ export default function App() {
                   {currentSection === "kyyeu" ? `Phần 1 • ${sectionNames.kyyeu}` : `Phần 2 • ${sectionNames.canhan}`}
                 </span>
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                  {currentSection === "kyyeu"
-                    ? `${stats.kyyeuCompleted}/${stats.kyyeuTotal} dáng`
-                    : `${stats.canhanCompleted}/${stats.canhanTotal} dáng`}
+                  {currentSection === "kyyeu" ? `${stats.kyyeuTotal} ảnh` : `${stats.canhanTotal} ảnh`}
                 </span>
               </div>
             </div>}
@@ -1483,7 +1368,7 @@ export default function App() {
                     <span>CHỌN CONCEPT:</span>
                   </div>
                   <button
-                    onClick={() => setCustomModalConfig({ isOpen: true, mode: "category" })}
+                    onClick={() => setCustomModalConfig({ isOpen: true })}
                     className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -1495,22 +1380,17 @@ export default function App() {
                 <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                   {canhanData.map((cat, idx) => {
                     const isActive = idx === activeCanhanCatIdx;
-                    const catCompleted = cat.poses.filter((p, pIdx) => {
-                      const key = p.id || `canhan-${idx}-${pIdx}`;
-                      return localStorage.getItem(`done-${key}`) === "true";
-                    }).length;
-
                     return (
                       <CategoryImageCard
                         key={cat.id || idx}
                         category={cat}
-                        completedCount={catCompleted}
+                        galleryImageCount={photoCounts[categoryGalleryKey("canhan", cat.id)] || 0}
                         isActive={isActive}
-                        isAdmin={isCurrentUserAdmin()}
+                        isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                         onDelete={() => void requestCategoryDeletion("canhan", cat, idx)}
                         onRename={() => promptRenameCategory("canhan", cat)}
-                        onShare={() => void shareLibraryItem(cat.label, `${cat.poses.length} dáng trong ${sectionNames.canhan}.`)}
-                        onDownload={() => void downloadPosePhotos(cat.poses, "canhan", idx, cat.label)}
+                        onShare={() => void shareLibraryItem(cat.label, `${(cat.images?.filter((image) => !image.photoId).length || 0) + (photoCounts[categoryGalleryKey("canhan", cat.id)] || 0)} ảnh trong ${sectionNames.canhan}.`)}
+                        onDownload={() => void downloadCategoryPhotos("canhan", cat)}
                         onSelect={() => {
                           setActiveCanhanCatIdx(idx);
                           setIsCategoryDetailOpen(true);
@@ -1524,7 +1404,7 @@ export default function App() {
                   {/* Add New Concept Card */}
                   <button
                     type="button"
-                    onClick={() => setCustomModalConfig({ isOpen: true, mode: "category" })}
+                    onClick={() => setCustomModalConfig({ isOpen: true })}
                     className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white/50 dark:bg-zinc-900/50 p-3 transition-all text-zinc-500 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
                   >
                     <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
@@ -1539,22 +1419,17 @@ export default function App() {
               <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                 {kyyeuData.map((cat, idx) => {
                   const isActive = idx === activeKyyeuCatIdx;
-                  const catCompleted = cat.poses.filter((p, pIdx) => {
-                    const key = p.id || `kyyeu-${idx}-${pIdx}`;
-                    return localStorage.getItem(`done-${key}`) === "true";
-                  }).length;
-
                   return (
                     <CategoryImageCard
                       key={cat.id || idx}
                       category={cat}
-                      completedCount={catCompleted}
+                      galleryImageCount={photoCounts[categoryGalleryKey("kyyeu", cat.id)] || 0}
                       isActive={isActive}
-                      isAdmin={isCurrentUserAdmin()}
+                      isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                       onDelete={() => void requestCategoryDeletion("kyyeu", cat, idx)}
                       onRename={() => promptRenameCategory("kyyeu", cat)}
-                      onShare={() => void shareLibraryItem(cat.label, `${cat.poses.length} dáng trong ${sectionNames.kyyeu}.`)}
-                      onDownload={() => void downloadPosePhotos(cat.poses, "kyyeu", idx, cat.label)}
+                      onShare={() => void shareLibraryItem(cat.label, `${(cat.images?.filter((image) => !image.photoId).length || 0) + (photoCounts[categoryGalleryKey("kyyeu", cat.id)] || 0)} ảnh trong ${sectionNames.kyyeu}.`)}
+                      onDownload={() => void downloadCategoryPhotos("kyyeu", cat)}
                       onSelect={() => {
                         setActiveKyyeuCatIdx(idx);
                         setIsCategoryDetailOpen(true);
@@ -1566,7 +1441,7 @@ export default function App() {
                 })}
                 <button
                   type="button"
-                  onClick={() => setCustomModalConfig({ isOpen: true, mode: "category" })}
+                  onClick={() => setCustomModalConfig({ isOpen: true })}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-amber-500 dark:hover:border-amber-400 bg-white/60 dark:bg-zinc-900/60 p-3 transition-all text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400"
                 >
                   <span className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center">
@@ -1644,70 +1519,36 @@ export default function App() {
             )}
 
             {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
-            {isCategoryDetailOpen && displayedPoses.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                {displayedPoses.map((pose, pIdx) => {
-                  const poseIndex = currentCategory.poses.findIndex((item) => item.id === pose.id);
-                  const poseKey = pose.id || `${currentSection}-${currentCatIdx}-${poseIndex >= 0 ? poseIndex : pIdx}`;
-                  const isDone = localStorage.getItem(`done-${poseKey}`) === "true";
-                  const count = photoCounts[poseKey] || 0;
-
-                  return (
-                    <PoseCard
-                      key={poseKey}
-                      pose={pose}
-                      poseKey={poseKey}
-                      isDone={isDone}
-                      photoCount={count}
-                      onClick={() => isSelectingSheetPoses
-                        ? toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
-                        : openLibraryPose({ pose, category: currentCategory, section: currentSection, categoryIndex: currentCatIdx, poseKey })}
-                      isSelectedForSheet={referenceSheetPoses.some((item) => item.key === poseKey)}
-                      isAdmin={isCurrentUserAdmin()}
-                      onAdminRename={() => promptRenamePose(currentSection as "kyyeu" | "canhan", currentCategory, pose)}
-                      onAdminDelete={() => void requestPoseDeletion(currentSection as "kyyeu" | "canhan", currentCategory, currentCatIdx, pose)}
-                      onAdminShare={() => void shareLibraryItem(pose.title, `Dáng trong ${currentCategory.label}.`)}
-                      onAdminDownload={() => void downloadPosePhotos([pose], currentSection as "kyyeu" | "canhan", currentCatIdx, pose.title)}
-                      onToggleSheetSelection={isSelectingSheetPoses
-                        ? () => toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
-                        : undefined}
-                      onToggleDoneQuick={(e) => {
-                        e.stopPropagation();
-                        handleToggleDone(poseKey);
-                      }}
-                      onEditCover={(e) => {
-                        e.stopPropagation();
-                        setActiveEditCover({
-                          type: "pose",
-                          poseKey,
-                          title: `Ảnh Đại Diện: ${pose.title}`,
-                          subtitle: currentCategory.label,
-                          currentImage: pose.coverImage,
-                        });
-                      }}
-                    />
-                  );
+            {isCategoryDetailOpen && (displayedGalleryImages.length > 0 || currentCategoryMatchesSearch && galleryPhotoUrls.length > 0 || !searchQuery.trim()) ? (
+      <div className="grid grid-cols-2 gap-3 pt-1">
+                {displayedGalleryImages.map((galleryImage) => {
+                  const localPhoto = galleryImage.photoId
+                    ? galleryPhotoUrls.find(({ photo }) => photo.cloudId === galleryImage.photoId)
+                    : undefined;
+                  const imageUrl = localPhoto?.url || galleryImage.imageUrl || (galleryImage.photoId
+                    ? serverUrl(`/api/cloud/photo/${encodeURIComponent(galleryImage.photoId)}/image`)
+                    : undefined);
+                  const similarImageUrl = galleryImage.photoId
+                    ? serverUrl(`/api/cloud/photo/${encodeURIComponent(galleryImage.photoId)}/image`)
+                    : galleryImage.imageUrl;
+                  return <GalleryImageCard key={galleryImage.id} imageUrl={imageUrl} label={currentCategory.label} onOpen={() => imageUrl && setLightboxImageUrl(imageUrl)} similarImageUrl={similarImageUrl} />;
                 })}
-
-                {/* Add Idea Card at the end of the category grid */}
-                {currentSection === "kyyeu" && <AddIdeaCard
-                  title="Thêm ý tưởng"
-                  subtitle="Bấm dấu + để thêm tư thế mới vào mục này"
-                  badgeText="+ Thêm dáng"
-                  onClick={() => {
-                    setCustomModalConfig({ isOpen: true, categoryId: currentCategory?.id, mode: "pose" });
-                  }}
-                />}
+                {galleryPhotoUrls.filter(({ photo }) => !photo.cloudId || !(currentCategory.images || []).some((image) => image.photoId === photo.cloudId)).map(({ photo, url }) => (
+                  <GalleryImageCard key={`local-${photo.id}`} imageUrl={url} label={currentCategory.label} onOpen={() => setLightboxImageUrl(url)} similarImageUrl={photo.cloudId ? serverUrl(`/api/cloud/photo/${encodeURIComponent(photo.cloudId)}/image`) : undefined} />
+                ))}
+                <button type="button" onClick={openCategoryGallery} className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 bg-white/60 text-xs font-bold text-zinc-500 hover:border-amber-500 hover:text-amber-600 dark:border-zinc-700 dark:bg-zinc-900/60">
+                  <Plus className="h-6 w-6" />Thêm ảnh vào danh mục
+                </button>
               </div>
             ) : isCategoryDetailOpen ? (
               <div className="space-y-3">
                 <div className="text-center py-14 px-4 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 space-y-2">
                   <Search className="w-8 h-8 text-zinc-400 mx-auto" />
                   <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                    Không tìm thấy tư thế phù hợp
+                    Không tìm thấy chủ đề phù hợp
                   </h3>
                   <p className="text-xs text-zinc-500 max-w-xs mx-auto">
-                    Hãy thử tìm kiếm với từ khóa khác hoặc bấm bên dưới để thêm ý tưởng mới.
+                    Hãy thử tìm tên chủ đề hoặc danh mục khác.
                   </p>
                   <button
                     onClick={() => {
@@ -1720,20 +1561,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {currentSection === "kyyeu" && <div className="grid grid-cols-2 gap-3">
-                  <AddIdeaCard
-                    title="Thêm ý tưởng"
-                    subtitle="Bấm dấu + để thêm tư thế mới vào mục này"
-                    badgeText="+ Thêm dáng"
-                    onClick={() => {
-                      setCustomModalConfig({
-                        isOpen: true,
-                        categoryId: currentCategory?.id,
-                        mode: "pose",
-                      });
-                    }}
-                  />
-                </div>}
               </div>
             ) : null}
 
@@ -1766,24 +1593,19 @@ export default function App() {
         </button>
       </div>
 
-      {referenceSheetPoses.length > 0 && (
-        <div className="fixed bottom-5 left-4 z-30 flex max-w-[calc(100vw-5rem)] items-center gap-2 rounded-2xl border border-amber-300 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-amber-800 dark:bg-zinc-900/95">
-          <button
-            type="button"
-            onClick={() => setShowReferenceSheet(true)}
-            className="flex items-center gap-2 rounded-xl bg-amber-500 px-3 py-2.5 text-xs font-extrabold text-zinc-950"
-          >
-            <FileImage className="h-4 w-4" /> Tờ tham khảo ({referenceSheetPoses.length})
-          </button>
-          <button type="button" onClick={() => setReferenceSheetPoses([])} aria-label="Xóa các dáng đã chọn" className="rounded-lg px-2 py-1 text-xs font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Xóa</button>
+      {/* MODAL 1: POSE DETAIL */}
+      {lightboxImageUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="Xem ảnh gallery" onClick={() => setLightboxImageUrl(null)}>
+          <button type="button" aria-label="Đóng ảnh" onClick={() => setLightboxImageUrl(null)} className="absolute right-4 top-4 rounded-full bg-black/60 px-3 py-2 text-sm font-bold text-white">Đóng</button>
+          <img src={lightboxImageUrl} alt="Ảnh tham khảo trong danh mục" className="max-h-[90vh] max-w-full rounded-xl object-contain" onClick={(event) => event.stopPropagation()} />
         </div>
       )}
-
-      {/* MODAL 1: POSE DETAIL */}
       {activePoseModal && (
         <PoseModal
           pose={activePoseModal.pose}
           categoryName={activePoseModal.categoryName}
+          isCategoryGallery={activePoseModal.poseKey.startsWith("category-gallery:v3:")}
+          reservedImageCount={activePoseModal.poseKey.startsWith("category-gallery:v3:") ? (currentCategory?.images?.filter((image) => !image.photoId).length || 0) : 0}
           poseKey={activePoseModal.poseKey}
           onClose={() => setActivePoseModal(null)}
           onOpenAdvisor={(pose, cat, initialPhoto) =>
@@ -1794,7 +1616,7 @@ export default function App() {
               initialPhotoUrl: initialPhoto,
             })
           }
-          onPhotosUpdated={refreshPhotoCounts}
+          onPhotosUpdated={refreshCategoryGalleryPhotos}
           onSetAsCover={(photoUrl) => {
             handleSaveCoverImage(photoUrl);
           }}
@@ -1837,15 +1659,10 @@ export default function App() {
         />
       )}
 
-      {/* MODAL 6: ADD CUSTOM POSE OR CATEGORY */}
+      {/* MODAL 6: ADD CATEGORY */}
       {customModalConfig.isOpen && (
         <AddCustomPoseModal
-          kyyeuCategories={kyyeuData}
-          canhanCategories={canhanData}
           currentSection={currentSection}
-          initialCategoryId={customModalConfig.categoryId}
-          initialMode={customModalConfig.mode}
-          onAddPose={handleAddPose}
           onAddCategory={handleAddCategory}
           onClose={() => setCustomModalConfig({ isOpen: false })}
         />
@@ -1884,9 +1701,6 @@ export default function App() {
         onDownloadHtmlOffline={() => exportSingleFileHtml(kyyeuData, canhanData)}
         onSyncComplete={refreshPhotoCounts}
       />}
-      {showReferenceSheet && (
-        <ReferenceSheetModal poses={referenceSheetPoses} onClose={() => setShowReferenceSheet(false)} />
-      )}
       {categoryDeleteCandidate && (
         <CategoryDeleteConfirmModal
           categoryName={categoryDeleteCandidate.category.label}
