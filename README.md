@@ -1,4 +1,4 @@
-# POSING ART 2.8.0
+# POSING ART 2.8.1
 
 Sổ tay tạo dáng và trợ lý nhiếp ảnh. Dự án hỗ trợ Web/PWA và Android; tài khoản, ảnh và dữ liệu concept đồng bộ qua backend Express.
 

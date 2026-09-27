@@ -21,6 +21,7 @@ import {
   WifiOff,
   ListChecks,
   FileImage,
+  ChevronDown,
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
@@ -58,6 +59,7 @@ type CoverImageSyncData =
 
 const COVER_IMAGE_RECORD_PREFIX = "cover_image:";
 const RECENT_VIEW_KEY = "posing_recent_pose_views_v1";
+const HOME_SCROLL_HINT_KEY = "posing_home_scroll_hint_seen_v1";
 
 interface CategoryDeleteCandidate {
   section: "kyyeu" | "canhan";
@@ -167,6 +169,7 @@ export default function App() {
   // Search query & filter status
   const [searchQuery, setSearchQuery] = useState("");
   const [recentPoseViews, setRecentPoseViews] = useState<RecentPoseView[]>(readRecentPoseViews);
+  const [showHomeScrollHint, setShowHomeScrollHint] = useState(() => localStorage.getItem(HOME_SCROLL_HINT_KEY) !== "true");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
 
   // Photo counts map from IndexedDB
@@ -212,6 +215,27 @@ export default function App() {
       window.removeEventListener("offline", updateNetworkState);
     };
   }, []);
+
+  useEffect(() => {
+    if (!showHomeScrollHint) return;
+    let lastScrollY = window.scrollY;
+    const dismissHint = () => {
+      localStorage.setItem(HOME_SCROLL_HINT_KEY, "true");
+      setShowHomeScrollHint(false);
+    };
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const hasScrolledDown = currentScrollY > lastScrollY + 8 && currentScrollY > 12;
+      lastScrollY = currentScrollY;
+      if (hasScrolledDown) dismissHint();
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    const timeout = window.setTimeout(dismissHint, 7000);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.clearTimeout(timeout);
+    };
+  }, [showHomeScrollHint]);
 
   useEffect(() => {
     const pruneExpiredViews = () => {
@@ -879,6 +903,25 @@ export default function App() {
                 poseTitles={currentCategory.poses.map((pose) => pose.title)}
               />
             )}
+            {isCategoryDetailOpen && currentCategory && (
+              <section className="rounded-2xl border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 dark:bg-violet-950/30 p-4 space-y-3">
+                <div>
+                  <h3 className="text-sm font-black text-violet-900 dark:text-violet-200 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-violet-500" /> Trợ lý AI cho {currentCategory.label}
+                  </h3>
+                  <p className="mt-1 text-xs text-violet-800/80 dark:text-violet-300/80">
+                    Nhận gợi ý góc chụp, cách tạo dáng và đạo cụ phù hợp với chủ đề.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveAdvisorModal({ pose: null, categoryName: currentCategory.label })}
+                  className="w-full rounded-xl bg-violet-600 px-3 py-2.5 text-xs font-bold text-white flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Hỏi trợ lý AI
+                </button>
+              </section>
+            )}
             {currentCategory && isCategoryDetailOpen && (
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -1507,30 +1550,23 @@ export default function App() {
               </div>
             ) : null}
 
-            {(currentSection === "canhan" || currentSection === "kyyeu") && isCategoryDetailOpen && currentCategory && (
-              <section className="rounded-2xl border border-violet-200 dark:border-violet-900/60 bg-violet-50/70 dark:bg-violet-950/30 p-4 space-y-3">
-                <div>
-                  <h3 className="text-sm font-black text-violet-900 dark:text-violet-200 flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-violet-500" /> Trợ lý AI cho {currentCategory.label}
-                  </h3>
-                  <p className="mt-1 text-xs text-violet-800/80 dark:text-violet-300/80">
-                    Nhận gợi ý góc chụp, cách tạo dáng và đạo cụ phù hợp với chủ đề.
-                  </p>
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveAdvisorModal({ pose: null, categoryName: currentCategory.label })}
-                    className="w-full rounded-xl bg-violet-600 px-3 py-2.5 text-xs font-bold text-white flex items-center justify-center gap-1.5"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" /> Hỏi trợ lý AI
-                  </button>
-                </div>
-              </section>
-            )}
           </div>
         )}
       </main>
+
+      {showHomeScrollHint && currentSection === "home" && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: [0, -5, 0] }}
+          transition={{ opacity: { duration: 0.25 }, y: { duration: 1.2, repeat: Infinity, ease: "easeInOut" } }}
+          className="fixed bottom-16 left-1/2 z-20 -translate-x-1/2 pointer-events-none"
+        >
+          <div className="flex items-center gap-1.5 rounded-full border border-white/70 bg-zinc-900/80 px-3 py-1.5 text-[11px] font-bold text-white shadow-lg backdrop-blur-md dark:border-zinc-700/80">
+            <span>Vuốt xuống để khám phá</span>
+            <ChevronDown className="h-4 w-4 text-amber-300" />
+          </div>
+        </motion.div>
+      )}
 
       {/* Floating Action Button (AI Assistant) */}
       <div className="fixed bottom-5 right-5 z-30 flex flex-col gap-2">
