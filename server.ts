@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { MongoClient } from "mongodb";
 import type { Collection, Db } from "mongodb";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
+import { withGeminiUnavailableRetry } from "./src/services/geminiRetry";
 import { APP_RELEASE_DATE, APP_VERSION, CURRENT_RELEASE_NOTES } from "./src/version";
 
 dotenv.config();
@@ -1616,11 +1617,6 @@ function getAiErrorMessage(error: any, fallback: string): string {
   return message || fallback;
 }
 
-function isRetryableAiError(error: any): boolean {
-  const status = Number(error?.status || error?.code);
-  return error?.code === "AI_TIMEOUT" || status === 408 || status === 429 || status >= 500;
-}
-
 // 1. Analyze Pose using gemini-3.1-pro-preview
 app.post("/api/ai/creative-chat", async (req, res) => {
   try {
@@ -1717,26 +1713,18 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
     }
 
     let response: any = null;
-    let lastError: any = null;
     const chatModels = ["gemini-3.6-flash", "gemini-3.8-flash"];
-    for (const m of chatModels) {
-      try {
-        response = await withAiTimeout(ai.models.generateContent({
-          model: m,
-          contents: { parts },
-        }));
-        if (response?.text) break;
-      } catch (e: any) {
-        lastError = e;
-        console.warn(`Chat model ${m} failed:`, e?.message);
-        if (!isRetryableAiError(e)) throw e;
-      }
-    }
-
-    if (!response || !response.text) {
-      if (lastError) throw lastError;
-      throw new Error("Không thể kết nối đến mô hình AI lúc này.");
-    }
+    let activeModel = chatModels[0];
+    response = await withGeminiUnavailableRetry(
+      () => withAiTimeout(ai.models.generateContent({ model: activeModel, contents: { parts } })),
+      {
+        onRetry: (retryNumber, delayMs) => {
+          if (retryNumber === 2) activeModel = chatModels[1];
+          console.warn(`[AI Creative] ${activeModel} retry ${retryNumber}/2 after Gemini 503/UNAVAILABLE; wait ${delayMs}ms`);
+        },
+      },
+    );
+    if (!response?.text) throw new Error("Gemini không trả về nội dung.");
 
     const reply = response.text || "Đã tạo ý tưởng thành công.";
     res.json({
@@ -1795,16 +1783,12 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
     ];
     let response: any = null;
     let lastError: any = null;
-
-    for (let i = 0; i < modelsToTry.length; i++) {
-      const modelCandidate = modelsToTry[i];
-      try {
-        if (i > 0) {
-          // Brief pause before retry/fallback to avoid demand spike
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        response = await withAiTimeout(ai.models.generateContent({
-          model: modelCandidate,
+    let activeModelIndex = 0;
+    const activeModel = () => modelsToTry[activeModelIndex];
+    try {
+      response = await withGeminiUnavailableRetry(
+        () => withAiTimeout(ai.models.generateContent({
+          model: activeModel(),
           contents: {
             parts: [
               {
@@ -1821,15 +1805,17 @@ app.post("/api/ai/analyze-pose", async (req, res) => {
           config: {
             responseMimeType: "application/json",
           },
-        }));
-        if (response && response.text) {
-          break;
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[AI Pose Advisor] Attempt ${i + 1} (${modelCandidate}) failed:`, err?.status || err?.code, err?.message);
-        if (!isRetryableAiError(err)) break;
-      }
+        })),
+        {
+          onRetry: (retryNumber, delayMs) => {
+            activeModelIndex = Math.min(retryNumber, modelsToTry.length - 1);
+            console.warn(`[AI Pose Advisor] ${activeModel()} retry ${retryNumber}/2 after Gemini 503/UNAVAILABLE; wait ${delayMs}ms`);
+          },
+        },
+      );
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[AI Pose Advisor] ${activeModel()} failed:`, err?.status || err?.code, err?.message);
     }
 
     if (!response || !response.text) {

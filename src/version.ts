@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.8.1";
-export const APP_BUILD_NUMBER = 281;
+export const APP_VERSION = "2.8.2";
+export const APP_BUILD_NUMBER = 282;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 2.8.2: tự thử lại tối đa hai lần khi Gemini trả 503/UNAVAILABLE.",
   "Phiên bản 2.8.1: hiển thị trợ lý AI ngay đầu chi tiết chủ đề và gợi ý vuốt xuống khi mở app lần đầu.",
   "Phiên bản 2.8.0: AI tạo gợi ý tìm kiếm Pinterest/Rednote theo từng concept và pose có sẵn.",
   "Phiên bản 2.7.0: kéo thả nhiều ảnh vào chủ đề trên Web và tự ẩn lịch sử đã xem sau 24 giờ.",
