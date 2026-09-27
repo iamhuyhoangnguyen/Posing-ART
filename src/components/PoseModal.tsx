@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
 import { motion } from "framer-motion";
 import {
   X,
@@ -50,6 +51,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   onPhotosUpdated,
   onSetAsCover,
 }) => {
+  const supportsFileDrop = Capacitor.getPlatform() === "web";
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [lightboxPhotoIndex, setLightboxPhotoIndex] = useState<number | null>(null);
@@ -61,6 +63,8 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<number>>(() => new Set());
   const [openPhotoMenuId, setOpenPhotoMenuId] = useState<number | null>(null);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const fileDragDepth = useRef(0);
   const photosWithUrls = useMemo(
     () => photos.map((photo) => ({ photo, url: URL.createObjectURL(photo.blob) })),
     [photos],
@@ -147,6 +151,23 @@ export const PoseModal: React.FC<PoseModalProps> = ({
 
   const handleUploadFiles = async (files: File[]) => {
     if (!files.length) return;
+    const invalidFiles = files.filter((file) => !file.type.startsWith("image/"));
+    if (invalidFiles.length) {
+      setPasteToast(`Chỉ nhận file ảnh. File không hợp lệ: ${invalidFiles.map((file) => file.name).join(", ")}`);
+      setTimeout(() => setPasteToast(null), 5000);
+      return;
+    }
+    const oversizedFiles = files.filter((file) => file.size > 10 * 1024 * 1024);
+    if (oversizedFiles.length) {
+      setPasteToast(`Mỗi ảnh tối đa 10 MB. File vượt giới hạn: ${oversizedFiles.map((file) => file.name).join(", ")}`);
+      setTimeout(() => setPasteToast(null), 5000);
+      return;
+    }
+    if (photos.length + files.length > MAX_PHOTOS_PER_TOPIC) {
+      setPasteToast(`Mỗi chủ đề lưu tối đa ${MAX_PHOTOS_PER_TOPIC} ảnh. Hiện có ${photos.length} ảnh, bạn đang thêm ${files.length}; hãy chọn ít ảnh hơn hoặc xóa bớt ảnh.`);
+      setTimeout(() => setPasteToast(null), 5000);
+      return;
+    }
     const user = getCurrentUser();
     const isAdmin = isCurrentUserAdmin();
     try {
@@ -175,6 +196,33 @@ export const PoseModal: React.FC<PoseModalProps> = ({
       setPasteToast("Không thể mở thư viện ảnh trên thiết bị.");
       setTimeout(() => setPasteToast(null), 4000);
     }
+  };
+
+  const hasDraggedFiles = (event: React.DragEvent<HTMLButtonElement>) =>
+    supportsFileDrop && Array.from(event.dataTransfer.types).includes("Files");
+  const handleFileDragEnter = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    fileDragDepth.current += 1;
+    setIsDraggingFiles(true);
+  };
+  const handleFileDragOver = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const handleFileDragLeave = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!supportsFileDrop) return;
+    event.preventDefault();
+    fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
+    if (!fileDragDepth.current) setIsDraggingFiles(false);
+  };
+  const handleFileDrop = (event: React.DragEvent<HTMLButtonElement>) => {
+    if (!supportsFileDrop || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    fileDragDepth.current = 0;
+    setIsDraggingFiles(false);
+    void handleUploadFiles(Array.from(event.dataTransfer.files));
   };
 
   const photoFileName = (photo: PhotoRecord) => {
@@ -427,11 +475,15 @@ export const PoseModal: React.FC<PoseModalProps> = ({
               <button
                 type="button"
                 onClick={handleChoosePhotos}
-                className="aspect-square rounded-2xl border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-600 bg-zinc-50 dark:bg-zinc-900/50 flex flex-col items-center justify-center gap-1 text-zinc-400 hover:text-amber-500 cursor-pointer transition-colors active:scale-95 text-center p-1"
+                onDragEnter={supportsFileDrop ? handleFileDragEnter : undefined}
+                onDragOver={supportsFileDrop ? handleFileDragOver : undefined}
+                onDragLeave={supportsFileDrop ? handleFileDragLeave : undefined}
+                onDrop={supportsFileDrop ? handleFileDrop : undefined}
+                className={`aspect-square rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors active:scale-95 text-center p-1 ${isDraggingFiles ? "border-amber-500 bg-amber-100 dark:bg-amber-950/70 text-amber-600 dark:text-amber-300 scale-[1.02]" : "border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-600 bg-zinc-50 dark:bg-zinc-900/50 text-zinc-400 hover:text-amber-500"}`}
               >
                 <Plus className="w-5 h-5" />
-                <span className="text-[10px] font-bold">Thêm ảnh</span>
-                <span className="text-[9px] text-zinc-400">Chọn nhiều ảnh</span>
+                <span className="text-[10px] font-bold">{isDraggingFiles ? "Thả ảnh vào đây" : "Thêm ảnh"}</span>
+                <span className="text-[9px] text-zinc-400">{isDraggingFiles ? "Nhận nhiều ảnh cùng lúc" : supportsFileDrop ? "Chọn hoặc kéo thả nhiều ảnh" : "Chọn nhiều ảnh"}</span>
               </button>
 
               {photosWithUrls.map(({ photo: p, url: imgUrl }, photoIndex) => {

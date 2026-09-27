@@ -49,6 +49,7 @@ import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purge
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
 import { motion, type Variants } from "framer-motion";
+import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -57,11 +58,6 @@ type CoverImageSyncData =
 
 const COVER_IMAGE_RECORD_PREFIX = "cover_image:";
 const RECENT_VIEW_KEY = "posing_recent_pose_views_v1";
-
-interface RecentPoseView {
-  poseKey: string;
-  viewedAt: number;
-}
 
 interface CategoryDeleteCandidate {
   section: "kyyeu" | "canhan";
@@ -80,10 +76,7 @@ function filterDeletedCategories(section: "kyyeu" | "canhan", categories: Catego
 function readRecentPoseViews(): RecentPoseView[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(RECENT_VIEW_KEY) || "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is RecentPoseView =>
-      typeof item?.poseKey === "string" && Number.isFinite(item?.viewedAt)
-    ).slice(0, 20);
+    return filterRecentPoseViews(parsed);
   } catch {
     return [];
   }
@@ -219,6 +212,29 @@ export default function App() {
       window.removeEventListener("offline", updateNetworkState);
     };
   }, []);
+
+  useEffect(() => {
+    const pruneExpiredViews = () => {
+      const views = readRecentPoseViews();
+      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(views));
+      setRecentPoseViews((current) => JSON.stringify(current) === JSON.stringify(views) ? current : views);
+    };
+    pruneExpiredViews();
+    const nextExpiry = recentPoseViews.length
+      ? Math.min(...recentPoseViews.map((item) => item.viewedAt + RECENT_POSE_VIEW_TTL_MS))
+      : null;
+    const timer = nextExpiry === null
+      ? undefined
+      : window.setTimeout(pruneExpiredViews, Math.max(0, nextExpiry - Date.now()));
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") pruneExpiredViews();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [recentPoseViews]);
 
   const toggleReferenceSheetPose = (pose: PoseItem, categoryName: string, key: string) => {
     setReferenceSheetPoses((selected) => selected.some((item) => item.key === key)

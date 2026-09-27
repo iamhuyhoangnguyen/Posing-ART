@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "2.6.3";
-export const APP_BUILD_NUMBER = 263;
+export const APP_VERSION = "2.7.0";
+export const APP_BUILD_NUMBER = 270;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 2.7.0: kéo thả nhiều ảnh vào chủ đề trên Web và tự ẩn lịch sử đã xem sau 24 giờ.",
   "Phiên bản 2.6.3: mở tìm kiếm RedNote trực tiếp trong app trên Android, tự dự phòng sang web nếu chưa cài.",
   "Phiên bản 2.6.2: công tắc giao diện Sáng/Tối gọn hơn và link tìm kiếm mở app trên điện thoại khi có thể.",
   "Phiên bản 2.6.1: sửa khung hiển thị ảnh bìa và tải ảnh trực tuyến ổn định hơn.",
