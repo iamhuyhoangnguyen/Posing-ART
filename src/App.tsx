@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
-import { getPhotoCounts, deletePhotosForPoses } from "./utils/db";
+import { getPhotoCounts, deletePhotosForPoses, getPhotosForPose } from "./utils/db";
 import { Header } from "./components/Header";
 import { PoseCard } from "./components/PoseCard";
 import { CategoryImageCard } from "./components/CategoryImageCard";
@@ -47,10 +47,11 @@ import { InspirationBar } from "./components/InspirationBar";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
 import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
-import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, type CategoryDeletionPreview } from "./services/categoryAdminService";
+import { deleteCategoryFromCloud, deletePoseFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
+import { saveImageToDevice } from "./services/platformService";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -60,6 +61,9 @@ type CoverImageSyncData =
 const COVER_IMAGE_RECORD_PREFIX = "cover_image:";
 const RECENT_VIEW_KEY = "posing_recent_pose_views_v1";
 const HOME_SCROLL_HINT_KEY = "posing_home_scroll_hint_seen_v1";
+const LIBRARY_RENAMES_KEY = "posing_library_renames_v1";
+
+type LibraryRename = { id: string; kind: "libraryRename"; targetKind: "section" | "category" | "pose"; section: "kyyeu" | "canhan"; categoryId?: string; poseId?: string; label: string };
 
 interface CategoryDeleteCandidate {
   section: "kyyeu" | "canhan";
@@ -82,6 +86,32 @@ function readRecentPoseViews(): RecentPoseView[] {
   } catch {
     return [];
   }
+}
+
+function readLibraryRenames(): LibraryRename[] {
+  try {
+    const values = JSON.parse(localStorage.getItem(LIBRARY_RENAMES_KEY) || "[]");
+    return Array.isArray(values) ? values.filter((item) => item?.kind === "libraryRename" && typeof item.label === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function applyCategoryRenames(categories: CategoryItem[], section: "kyyeu" | "canhan", renames: LibraryRename[]): CategoryItem[] {
+  let deletedPoseKeys: string[] = [];
+  try { deletedPoseKeys = JSON.parse(localStorage.getItem("posing_deleted_pose_keys") || "[]"); } catch { /* Ignore malformed local tombstones. */ }
+  const deleted = new Set(deletedPoseKeys);
+  return categories.map((category) => {
+    const categoryRename = renames.find((item) => item.targetKind === "category" && item.section === section && item.categoryId === category.id);
+    return {
+      ...category,
+      label: categoryRename?.label || category.label,
+      poses: category.poses.filter((pose) => !deleted.has(pose.id)).map((pose) => {
+        const poseRename = renames.find((item) => item.targetKind === "pose" && item.section === section && item.categoryId === category.id && item.poseId === pose.id);
+        return poseRename ? { ...pose, title: poseRename.label } : pose;
+      }),
+    };
+  });
 }
 
 function coverImageRecordId(data: CoverImageSyncData): string {
@@ -130,6 +160,7 @@ export default function App() {
 
   // Category data with localStorage persistence (Filter out male category)
   const [kyyeuData, setKyyeuData] = useState<CategoryItem[]>(() => {
+    const renames = readLibraryRenames();
     const saved = localStorage.getItem("kyyeu-data-v1");
     if (saved) {
       try {
@@ -138,24 +169,32 @@ export default function App() {
         const filtered = parsed.filter(
           (c) => c.id !== "kyyeu-nam" && !c.label.toLowerCase().includes("đơn nam")
         );
-        return filterDeletedCategories("kyyeu", filtered);
+        return applyCategoryRenames(filterDeletedCategories("kyyeu", filtered), "kyyeu", renames);
       } catch (e) {
         console.error(e);
       }
     }
-    return filterDeletedCategories("kyyeu", INITIAL_DATA_KYYEU);
+    return applyCategoryRenames(filterDeletedCategories("kyyeu", INITIAL_DATA_KYYEU), "kyyeu", renames);
   });
 
   const [canhanData, setCanhanData] = useState<CategoryItem[]>(() => {
+    const renames = readLibraryRenames();
     const saved = localStorage.getItem("canhan-data-v1");
     if (saved) {
       try {
-        return filterDeletedCategories("canhan", JSON.parse(saved));
+        return applyCategoryRenames(filterDeletedCategories("canhan", JSON.parse(saved)), "canhan", renames);
       } catch (e) {
         console.error(e);
       }
     }
-    return filterDeletedCategories("canhan", INITIAL_DATA_CANHAN);
+    return applyCategoryRenames(filterDeletedCategories("canhan", INITIAL_DATA_CANHAN), "canhan", renames);
+  });
+  const [sectionNames, setSectionNames] = useState<{ kyyeu: string; canhan: string }>(() => {
+    const renames = readLibraryRenames();
+    return {
+      kyyeu: renames.find((item) => item.targetKind === "section" && item.section === "kyyeu")?.label || "Kỷ Yếu",
+      canhan: renames.find((item) => item.targetKind === "section" && item.section === "canhan")?.label || "Concept & Bối Cảnh",
+    };
   });
 
   // Active category index within section
@@ -349,6 +388,23 @@ export default function App() {
     localStorage.setItem("canhan-data-v1", JSON.stringify(canhanData));
   }, [canhanData]);
 
+  useEffect(() => {
+    const applyRemoteRenames = (event: Event) => {
+      const detail = (event as CustomEvent<{ renames?: LibraryRename[] }>).detail;
+      if (!Array.isArray(detail?.renames)) return;
+      const renames = detail.renames;
+      localStorage.setItem(LIBRARY_RENAMES_KEY, JSON.stringify(renames));
+      setKyyeuData((categories) => applyCategoryRenames(categories, "kyyeu", renames));
+      setCanhanData((categories) => applyCategoryRenames(categories, "canhan", renames));
+      setSectionNames({
+        kyyeu: renames.find((item) => item.targetKind === "section" && item.section === "kyyeu")?.label || "Kỷ Yếu",
+        canhan: renames.find((item) => item.targetKind === "section" && item.section === "canhan")?.label || "Concept & Bối Cảnh",
+      });
+    };
+    window.addEventListener("cloud_library_renames", applyRemoteRenames);
+    return () => window.removeEventListener("cloud_library_renames", applyRemoteRenames);
+  }, []);
+
   const applySyncedCoverImages = () => {
     const records = getUserRecordsByType<CoverImageSyncData>("setting")
       .filter((record) => record.id.startsWith(COVER_IMAGE_RECORD_PREFIX));
@@ -468,11 +524,26 @@ export default function App() {
       setReferenceSheetPoses((selected) => selected.filter((item) => !removedPoseKeys.has(item.key)));
       setDoneVersion((version) => version + 1);
     };
+    const removeDeletedPoses = (event: Event) => {
+      const deletedPoseKeys = (event as CustomEvent<{ deletedPoseKeys?: string[] }>).detail?.deletedPoseKeys || [];
+      if (!deletedPoseKeys.length) return;
+      const deleted = new Set(deletedPoseKeys);
+      setKyyeuData((categories) => categories.map((category) => ({ ...category, poses: category.poses.filter((pose) => !deleted.has(pose.id)) })));
+      setCanhanData((categories) => categories.map((category) => ({ ...category, poses: category.poses.filter((pose) => !deleted.has(pose.id)) })));
+      deletedPoseKeys.forEach((key) => localStorage.removeItem(`done-${key}`));
+      const updatedViews = readRecentPoseViews().filter((item) => !deleted.has(item.poseKey));
+      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
+      setRecentPoseViews(updatedViews);
+      setReferenceSheetPoses((items) => items.filter((item) => !deleted.has(item.key)));
+      setDoneVersion((version) => version + 1);
+    };
     window.addEventListener("cloud_records_synced", refreshSyncedProgress);
     window.addEventListener("cloud_categories_synced", removeDeletedCategories);
+    window.addEventListener("cloud_poses_synced", removeDeletedPoses);
     return () => {
       window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
       window.removeEventListener("cloud_categories_synced", removeDeletedCategories);
+      window.removeEventListener("cloud_poses_synced", removeDeletedPoses);
     };
   }, []);
 
@@ -639,6 +710,105 @@ export default function App() {
     updater((prev) => [...prev, newCat]);
   };
 
+  const saveLibraryRename = async (rename: Omit<LibraryRename, "id" | "kind">) => {
+    if (!isCurrentUserAdmin()) return;
+    try {
+      await renameLibraryItem({ kind: rename.targetKind, section: rename.section, categoryId: rename.categoryId, poseId: rename.poseId, label: rename.label });
+      const id = `rename:${rename.targetKind}:${rename.section}:${rename.categoryId || ""}:${rename.poseId || ""}`;
+      const entry: LibraryRename = { ...rename, id, kind: "libraryRename" };
+      const renames = readLibraryRenames().filter((item) => item.id !== id).concat(entry);
+      localStorage.setItem(LIBRARY_RENAMES_KEY, JSON.stringify(renames));
+      setKyyeuData((categories) => applyCategoryRenames(categories, "kyyeu", renames));
+      setCanhanData((categories) => applyCategoryRenames(categories, "canhan", renames));
+      if (rename.targetKind === "section") setSectionNames((names) => ({ ...names, [rename.section]: rename.label }));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể đổi tên. Vui lòng thử lại.");
+    }
+  };
+
+  const promptRenameSection = (section: "kyyeu" | "canhan") => {
+    if (!isCurrentUserAdmin()) return;
+    const currentName = sectionNames[section];
+    const nextName = window.prompt("Nhập tên mới:", currentName)?.trim();
+    if (!nextName || nextName === currentName) return;
+    const otherName = sectionNames[section === "kyyeu" ? "canhan" : "kyyeu"];
+    if (nextName.toLocaleLowerCase("vi-VN") === otherName.toLocaleLowerCase("vi-VN")) return window.alert("Tên này đã được sử dụng ở cùng cấp.");
+    void saveLibraryRename({ targetKind: "section", section, label: nextName });
+  };
+
+  const promptRenameCategory = (section: "kyyeu" | "canhan", category: CategoryItem) => {
+    if (!isCurrentUserAdmin()) return;
+    const nextName = window.prompt("Nhập tên danh mục mới:", category.label)?.trim();
+    if (!nextName || nextName === category.label) return;
+    const siblings = (section === "kyyeu" ? kyyeuData : canhanData).filter((item) => item.id !== category.id);
+    if (siblings.some((item) => item.label.trim().toLocaleLowerCase("vi-VN") === nextName.toLocaleLowerCase("vi-VN"))) return window.alert("Tên này đã được sử dụng trong cùng danh mục.");
+    void saveLibraryRename({ targetKind: "category", section, categoryId: category.id, label: nextName });
+  };
+
+  const promptRenamePose = (section: "kyyeu" | "canhan", category: CategoryItem, pose: PoseItem) => {
+    if (!isCurrentUserAdmin()) return;
+    const nextName = window.prompt("Nhập tên dáng mới:", pose.title)?.trim();
+    if (!nextName || nextName === pose.title) return;
+    if (category.poses.some((item) => item.id !== pose.id && item.title.trim().toLocaleLowerCase("vi-VN") === nextName.toLocaleLowerCase("vi-VN"))) return window.alert("Tên này đã được sử dụng trong cùng danh mục.");
+    void saveLibraryRename({ targetKind: "pose", section, categoryId: category.id, poseId: pose.id, label: nextName });
+  };
+
+  const shareLibraryItem = async (title: string, description: string) => {
+    const shareData = { title, text: description, url: window.location.href };
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else {
+        await navigator.clipboard.writeText(`${title} — ${description} ${window.location.href}`);
+        window.alert("Đã sao chép nội dung chia sẻ.");
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) window.alert("Không thể chia sẻ mục này trên thiết bị hiện tại.");
+    }
+  };
+
+  const downloadPosePhotos = async (poses: PoseItem[], section: "kyyeu" | "canhan", categoryIndex: number, label: string) => {
+    const photos: Array<{ pose: PoseItem; blob: Blob; index: number }> = [];
+    for (const pose of poses) {
+      const poseIndex = (section === "kyyeu" ? kyyeuData : canhanData)[categoryIndex]?.poses.findIndex((item) => item.id === pose.id) ?? 0;
+      const poseKey = pose.id || `${section}-${categoryIndex}-${poseIndex}`;
+      const posePhotos = await getPhotosForPose(poseKey);
+      posePhotos.forEach((photo, index) => photos.push({ pose, blob: photo.blob, index: index + 1 }));
+    }
+    if (!photos.length) return window.alert("Mục này chưa có ảnh tham khảo để tải xuống.");
+    for (const [index, item] of photos.entries()) {
+      const extension = item.blob.type.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+      await saveImageToDevice(item.blob, `${label}-${item.pose.title}-${item.index}.${extension}`.replace(/[\\/:*?"<>|]/g, "-"));
+      if (index < photos.length - 1) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    window.alert(`Đã gửi ${photos.length} ảnh tới thư mục tải xuống.`);
+  };
+
+  const requestPoseDeletion = async (section: "kyyeu" | "canhan", category: CategoryItem, categoryIndex: number, pose: PoseItem) => {
+    if (!isCurrentUserAdmin()) return;
+    const poseIndex = category.poses.findIndex((item) => item.id === pose.id);
+    const poseKey = pose.id || `${section}-${categoryIndex}-${poseIndex}`;
+    try {
+      const preview = await previewCategoryDeletion({ section, categoryId: category.id, poseKeys: [poseKey] });
+      const localPhotoCount = (await getPhotosForPose(poseKey)).length;
+      const confirmed = window.confirm(`Xóa vĩnh viễn “${pose.title}”? Thao tác này sẽ xóa ${preview.photoCount} ảnh Cloud Drive, ${localPhotoCount} ảnh cục bộ trên thiết bị này và ${preview.customPoseCount} bản ghi dáng. Không thể hoàn tác.`);
+      if (!confirmed) return;
+      await deletePoseFromCloud({ section, categoryId: category.id, poseKey });
+      await deletePhotosForPoses([poseKey]);
+      if (section === "kyyeu") setKyyeuData((categories) => categories.map((item) => item.id === category.id ? { ...item, poses: item.poses.filter((entry) => entry.id !== pose.id) } : item));
+      else setCanhanData((categories) => categories.map((item) => item.id === category.id ? { ...item, poses: item.poses.filter((entry) => entry.id !== pose.id) } : item));
+      localStorage.setItem("posing_deleted_pose_keys", JSON.stringify([...new Set([...JSON.parse(localStorage.getItem("posing_deleted_pose_keys") || "[]"), poseKey])]));
+      localStorage.removeItem(`done-${poseKey}`);
+      const updatedViews = readRecentPoseViews().filter((item) => item.poseKey !== poseKey);
+      localStorage.setItem(RECENT_VIEW_KEY, JSON.stringify(updatedViews));
+      setRecentPoseViews(updatedViews);
+      setReferenceSheetPoses((items) => items.filter((item) => item.key !== poseKey));
+      if (activePoseModal?.poseKey === poseKey) setActivePoseModal(null);
+      await refreshPhotoCounts();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể xóa dáng. Vui lòng thử lại.");
+    }
+  };
+
   const handleDataRestored = (newKyyeu: CategoryItem[], newCanhan: CategoryItem[]) => {
     setKyyeuData(newKyyeu);
     setCanhanData(newCanhan);
@@ -795,9 +965,9 @@ export default function App() {
           currentSection === "home"
             ? "POSING ART"
             : currentSection === "kyyeu"
-            ? "KỶ YẾU"
+            ? sectionNames.kyyeu.toLocaleUpperCase("vi-VN")
             : currentSection === "canhan"
-            ? "CONCEPT & BỐI CẢNH"
+            ? sectionNames.canhan.toLocaleUpperCase("vi-VN")
             : "BÍ Ý TƯỞNG?"
         }
         subtitle={
@@ -920,6 +1090,7 @@ export default function App() {
                 >
                   <Sparkles className="h-3.5 w-3.5" /> Hỏi trợ lý AI
                 </button>
+
               </section>
             )}
             {currentCategory && isCategoryDetailOpen && (
@@ -1029,6 +1200,8 @@ export default function App() {
                   <span className="hidden sm:inline">Đổi ảnh bìa</span>
                 </button>
 
+                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("kyyeu"); }} aria-label="Đổi tên Phần 1" title="Đổi tên Phần 1" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
+
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.kyyeuCompleted} / {stats.kyyeuTotal} dáng
                 </div>
@@ -1039,7 +1212,7 @@ export default function App() {
                       PHẦN 1 • {kyyeuData.length} DANH MỤC
                     </span>
                     <h2 className="text-2xl font-black tracking-tight text-white mt-0.5">
-                      KỶ YẾU
+                      {sectionNames.kyyeu.toLocaleUpperCase("vi-VN")}
                     </h2>
                     <p className="text-xs text-white/80 mt-1 line-clamp-1">
                       Đơn Nữ, Đôi Bạn Thân, Áo Dài, Áo Cử Nhân, Đồng Phục, Hậu Trường
@@ -1095,6 +1268,8 @@ export default function App() {
                   <span className="hidden sm:inline">Đổi ảnh bìa</span>
                 </button>
 
+                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("canhan"); }} aria-label="Đổi tên Phần 2" title="Đổi tên Phần 2" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
+
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.canhanCompleted} / {stats.canhanTotal} dáng
                 </div>
@@ -1105,7 +1280,7 @@ export default function App() {
                       PHẦN 2 • THƯ VIỆN BỐI CẢNH & CONCEPT
                     </span>
                     <h2 className="text-2xl font-black tracking-tight text-white mt-0.5">
-                      CONCEPT & BỐI CẢNH
+                      {sectionNames.canhan.toLocaleUpperCase("vi-VN")}
                     </h2>
                     <p className="text-xs text-white/80 mt-1 line-clamp-1">
                       Sân Vườn, Đường Phố, Quán Cafe, Sân Thượng, Rừng Thông, Studio, Bờ Biển
@@ -1289,7 +1464,7 @@ export default function App() {
             {!isCategoryDetailOpen && <div className="flex justify-end">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                  {currentSection === "kyyeu" ? "Phần 1 • Kỷ Yếu" : "Phần 2 • Concept Cá Nhân"}
+                  {currentSection === "kyyeu" ? `Phần 1 • ${sectionNames.kyyeu}` : `Phần 2 • ${sectionNames.canhan}`}
                 </span>
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                   {currentSection === "kyyeu"
@@ -1333,6 +1508,9 @@ export default function App() {
                         isActive={isActive}
                         isAdmin={isCurrentUserAdmin()}
                         onDelete={() => void requestCategoryDeletion("canhan", cat, idx)}
+                        onRename={() => promptRenameCategory("canhan", cat)}
+                        onShare={() => void shareLibraryItem(cat.label, `${cat.poses.length} dáng trong ${sectionNames.canhan}.`)}
+                        onDownload={() => void downloadPosePhotos(cat.poses, "canhan", idx, cat.label)}
                         onSelect={() => {
                           setActiveCanhanCatIdx(idx);
                           setIsCategoryDetailOpen(true);
@@ -1374,6 +1552,9 @@ export default function App() {
                       isActive={isActive}
                       isAdmin={isCurrentUserAdmin()}
                       onDelete={() => void requestCategoryDeletion("kyyeu", cat, idx)}
+                      onRename={() => promptRenameCategory("kyyeu", cat)}
+                      onShare={() => void shareLibraryItem(cat.label, `${cat.poses.length} dáng trong ${sectionNames.kyyeu}.`)}
+                      onDownload={() => void downloadPosePhotos(cat.poses, "kyyeu", idx, cat.label)}
                       onSelect={() => {
                         setActiveKyyeuCatIdx(idx);
                         setIsCategoryDetailOpen(true);
@@ -1448,7 +1629,7 @@ export default function App() {
 
                 <div className="absolute bottom-3.5 left-4 right-4 text-white">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                    {currentSection === "kyyeu" ? "KỶ YẾU" : "CONCEPT CÁ NHÂN"}
+                    {currentSection === "kyyeu" ? sectionNames.kyyeu.toLocaleUpperCase("vi-VN") : sectionNames.canhan.toLocaleUpperCase("vi-VN")}
                   </span>
                   <h2 className="text-xl sm:text-2xl font-black text-white leading-tight">
                     {currentCategory.label}
@@ -1466,7 +1647,8 @@ export default function App() {
             {isCategoryDetailOpen && displayedPoses.length > 0 ? (
               <div className="grid grid-cols-2 gap-3 pt-1">
                 {displayedPoses.map((pose, pIdx) => {
-                  const poseKey = pose.id || `${currentSection}-${currentCatIdx}-${pIdx}`;
+                  const poseIndex = currentCategory.poses.findIndex((item) => item.id === pose.id);
+                  const poseKey = pose.id || `${currentSection}-${currentCatIdx}-${poseIndex >= 0 ? poseIndex : pIdx}`;
                   const isDone = localStorage.getItem(`done-${poseKey}`) === "true";
                   const count = photoCounts[poseKey] || 0;
 
@@ -1481,6 +1663,11 @@ export default function App() {
                         ? toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
                         : openLibraryPose({ pose, category: currentCategory, section: currentSection, categoryIndex: currentCatIdx, poseKey })}
                       isSelectedForSheet={referenceSheetPoses.some((item) => item.key === poseKey)}
+                      isAdmin={isCurrentUserAdmin()}
+                      onAdminRename={() => promptRenamePose(currentSection as "kyyeu" | "canhan", currentCategory, pose)}
+                      onAdminDelete={() => void requestPoseDeletion(currentSection as "kyyeu" | "canhan", currentCategory, currentCatIdx, pose)}
+                      onAdminShare={() => void shareLibraryItem(pose.title, `Dáng trong ${currentCategory.label}.`)}
+                      onAdminDownload={() => void downloadPosePhotos([pose], currentSection as "kyyeu" | "canhan", currentCatIdx, pose.title)}
                       onToggleSheetSelection={isSelectingSheetPoses
                         ? () => toggleReferenceSheetPose(pose, currentCategory.label, poseKey)
                         : undefined}

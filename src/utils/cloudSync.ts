@@ -24,6 +24,7 @@ export interface CloudSyncResponse {
   customPoses: any[];
   customCategories: any[];
   deletedCategories?: Array<{ section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] }>;
+  deletedPoseKeys?: string[];
   updatedAt: number;
 }
 
@@ -205,6 +206,9 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     connected = true;
 
     const cloudData: CloudSyncResponse = await res.json();
+    window.dispatchEvent(new CustomEvent("cloud_library_renames", {
+      detail: { renames: (cloudData.customCategories || []).filter((item: any) => item?.kind === "libraryRename") },
+    }));
     totalCloudPhotos = cloudData.photos?.length || 0;
 
     const deletedCategories = cloudData.deletedCategories || [];
@@ -217,6 +221,13 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     if (deletedPoseKeys.length) await deletePhotosForPoses(deletedPoseKeys);
     for (const category of deletedCategories) {
       purgeLocalRecordsForTopic(category.section, category.categoryId, category.poseKeys || []);
+    }
+    const individuallyDeletedPoseKeys = cloudData.deletedPoseKeys || [];
+    if (individuallyDeletedPoseKeys.length) {
+      const localDeleted = JSON.parse(localStorage.getItem("posing_deleted_pose_keys") || "[]") as string[];
+      localStorage.setItem("posing_deleted_pose_keys", JSON.stringify([...new Set([...localDeleted, ...individuallyDeletedPoseKeys])]));
+      await deletePhotosForPoses(individuallyDeletedPoseKeys);
+      window.dispatchEvent(new CustomEvent("cloud_poses_synced", { detail: { deletedPoseKeys: individuallyDeletedPoseKeys } }));
     }
     for (const poseKey of deletedPoseKeys) localStorage.removeItem(`done-${poseKey}`);
     window.dispatchEvent(new CustomEvent("cloud_categories_synced", { detail: { deletedCategories } }));

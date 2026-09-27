@@ -12,6 +12,7 @@ import type { Collection, Db } from "mongodb";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
 import { withGeminiUnavailableRetry } from "./src/services/geminiRetry";
 import { APP_RELEASE_DATE, APP_VERSION, CURRENT_RELEASE_NOTES } from "./src/version";
+import { INITIAL_DATA_CANHAN, INITIAL_DATA_KYYEU } from "./src/data/posesData";
 
 dotenv.config();
 
@@ -132,6 +133,7 @@ interface CloudDriveData {
   }>;
   customCategories: any[];
   deletedCategories: Array<{ section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] }>;
+  deletedPoseKeys: string[];
   updatedAt: number;
   legacyMigrationComplete?: boolean;
 }
@@ -360,6 +362,7 @@ function createEmptyCloudStore(): CloudDriveData {
     customPoses: [],
     customCategories: [],
     deletedCategories: [],
+    deletedPoseKeys: [],
     updatedAt: Date.now(),
   };
 }
@@ -382,6 +385,7 @@ function normalizeCloudStore(input: Partial<CloudDriveData> | null): CloudDriveD
   data.customPoses ||= [];
   data.customCategories ||= [];
   data.deletedCategories ||= [];
+  data.deletedPoseKeys ||= [];
 
   // Remove access tokens accidentally embedded in profile sync records by
   // older clients before writing the data to MongoDB.
@@ -533,6 +537,7 @@ async function persistMongoStore(data: CloudDriveData, previousData?: CloudDrive
         updatedAt: data.updatedAt,
         legacyMigrationComplete: data.legacyMigrationComplete === true,
         deletedCategories: data.deletedCategories,
+        deletedPoseKeys: data.deletedPoseKeys,
       },
       { upsert: true },
     ),
@@ -560,6 +565,7 @@ async function loadMongoStore(): Promise<CloudDriveData> {
     updatedAt: Number(metadata?.updatedAt) || Date.now(),
     legacyMigrationComplete: metadata?.legacyMigrationComplete === true,
     deletedCategories: Array.isArray(metadata?.deletedCategories) ? metadata.deletedCategories : [],
+    deletedPoseKeys: Array.isArray(metadata?.deletedPoseKeys) ? metadata.deletedPoseKeys : [],
     users: users.map((document) => removeStorageFields(document) as unknown as StoredUser),
     photos: photos.map((document) => removeStorageFields(document) as unknown as CloudPhotoItem),
     records: records.map((document) => removeStorageFields(document) as unknown as UserCloudRecord),
@@ -803,6 +809,7 @@ app.get("/api/cloud/sync", (_req, res) => {
     customPoses: cloudStore.customPoses,
     customCategories: cloudStore.customCategories,
     deletedCategories: cloudStore.deletedCategories,
+    deletedPoseKeys: cloudStore.deletedPoseKeys,
     updatedAt: cloudStore.updatedAt,
   });
 });
@@ -815,6 +822,7 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
 });
 
 const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com", "rednote.com"];
+const DROPPED_IMAGE_HOSTS = [...INSPIRATION_PAGE_HOSTS, "pinimg.com", "xhscdn.com", "xhscdn.net"];
 const MAX_INSPIRATION_HTML_BYTES = 2_000_000;
 const MAX_INSPIRATION_IMAGE_BYTES = 10 * 1024 * 1024;
 const INSPIRATION_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
@@ -988,8 +996,15 @@ async function getInspirationOgImage(value: string): Promise<{ imageUrl: string;
   throw new Error("Không thể theo liên kết chuyển hướng.");
 }
 
-async function downloadInspirationImage(value: string): Promise<string> {
+function isAllowedDroppedImageHost(hostname: string): boolean {
+  return DROPPED_IMAGE_HOSTS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+}
+
+async function downloadInspirationImage(value: string, allowedHosts?: string[]): Promise<string> {
   let imageUrl = await validatePublicInspirationImageUrl(value);
+  if (allowedHosts && !allowedHosts.some((domain) => imageUrl.hostname === domain || imageUrl.hostname.endsWith(`.${domain}`))) {
+    throw Object.assign(new Error("Domain ảnh chưa được cho phép. Chỉ hỗ trợ Pinterest/RedNote và CDN ảnh tương ứng."), { statusCode: 400 });
+  }
   for (let redirectCount = 0; redirectCount <= 4; redirectCount++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
@@ -1011,6 +1026,9 @@ async function downloadInspirationImage(value: string): Promise<string> {
         const location = response.headers.get("location");
         if (!location || redirectCount === 4) throw new Error("Ảnh nguồn chuyển hướng quá nhiều lần.");
         imageUrl = await validatePublicInspirationImageUrl(new URL(location, imageUrl).toString());
+        if (allowedHosts && !allowedHosts.some((domain) => imageUrl.hostname === domain || imageUrl.hostname.endsWith(`.${domain}`))) {
+          throw Object.assign(new Error("Ảnh chuyển hướng tới domain chưa được cho phép."), { statusCode: 400 });
+        }
         continue;
       }
       if (!response.ok) {
@@ -1098,6 +1116,30 @@ app.post("/api/inspiration/download-image", asyncRoute(async (req, res) => {
     return res.status(502).json({
       success: false,
       error: error?.message || "Không thể tải ảnh xem trước. Hãy thử ảnh khác hoặc tải ảnh lên từ thiết bị.",
+    });
+  }
+}));
+
+app.post("/api/inspiration/fetch-dropped-image", asyncRoute(async (req, res) => {
+  const value = req.body?.url;
+  if (typeof value !== "string" || !value.trim() || value.length > 4_096) {
+    return res.status(400).json({ success: false, error: "URL ảnh kéo thả không hợp lệ." });
+  }
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || !isAllowedDroppedImageHost(url.hostname.toLowerCase())) {
+      return res.status(400).json({ success: false, error: "Domain này chưa được hỗ trợ. Chỉ nhận ảnh Pinterest/RedNote và CDN ảnh hợp lệ." });
+    }
+    const pageHostAllowed = INSPIRATION_PAGE_HOSTS.some((domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    const imageUrl = pageHostAllowed
+      ? (await getInspirationOgImage(url.toString())).imageUrl
+      : url.toString();
+    const dataUrl = await downloadInspirationImage(imageUrl, DROPPED_IMAGE_HOSTS);
+    return res.json({ success: true, dataUrl });
+  } catch (error: any) {
+    return res.status(error?.statusCode || 502).json({
+      success: false,
+      error: error?.message || "Không thể tải ảnh từ URL đã thả. Hãy lưu ảnh về máy rồi thử lại.",
     });
   }
 }));
@@ -1268,7 +1310,8 @@ app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
   cloudStore.customPoses = cloudStore.customPoses.filter((item) =>
     !((item.section === topic.section && item.categoryId === topic.categoryId) || poseKeys.has(item.pose?.id))
   );
-  cloudStore.customCategories = cloudStore.customCategories.filter((category) => category?.id !== topic.categoryId);
+  cloudStore.customCategories = cloudStore.customCategories.filter((category) => category?.id !== topic.categoryId &&
+    !(category?.kind === "libraryRename" && category.section === topic.section && category.categoryId === topic.categoryId));
   cloudStore.records = cloudStore.records.filter((record) =>
     !isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
   );
@@ -1278,6 +1321,67 @@ app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
 
   await saveStore();
   res.json({ success: true, removed });
+}));
+
+app.post("/api/cloud/library/rename", asyncRoute(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { kind, section, categoryId, poseId, label } = req.body || {};
+  if (!(["section", "category", "pose"] as string[]).includes(kind) || !(["kyyeu", "canhan"] as string[]).includes(section) ||
+    typeof label !== "string" || !label.trim() || label.trim().length > 100 ||
+    (kind !== "section" && (typeof categoryId !== "string" || !categoryId)) ||
+    (kind === "pose" && (typeof poseId !== "string" || !poseId))) {
+    return res.status(400).json({ success: false, error: "Thông tin đổi tên không hợp lệ." });
+  }
+  const nextLabel = label.trim();
+  const renameKey = `rename:${kind}:${section}:${categoryId || ""}:${poseId || ""}`;
+  const overrides = cloudStore.customCategories.filter((item) => item?.kind === "libraryRename");
+  const sectionCategories = section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN;
+  let siblingNames: string[] = [];
+  if (kind === "section") {
+    siblingNames = overrides.filter((item) => item.kind === "libraryRename" && item.targetKind === "section" && item.section !== section).map((item) => item.label);
+    siblingNames.push(section === "kyyeu" ? "Concept & Bối Cảnh" : "Kỷ Yếu");
+  } else if (kind === "category") {
+    siblingNames = sectionCategories.filter((item) => item.id !== categoryId).map((item) =>
+      overrides.find((entry) => entry.targetKind === "category" && entry.section === section && entry.categoryId === item.id)?.label || item.label);
+    const customSiblings = cloudStore.customCategories.filter((item) => item?.section === section && item?.kind !== "libraryRename" && item?.id !== categoryId);
+    siblingNames.push(...customSiblings.map((item) => item.label));
+  } else {
+    const category = sectionCategories.find((item) => item.id === categoryId);
+    siblingNames = category?.poses.filter((pose) => pose.id !== poseId).map((pose) =>
+      overrides.find((entry) => entry.targetKind === "pose" && entry.section === section && entry.categoryId === categoryId && entry.poseId === pose.id)?.label || pose.title) || [];
+    siblingNames.push(...cloudStore.customPoses.filter((item) => item.section === section && item.categoryId === categoryId && item.pose?.id !== poseId).map((item) => item.pose?.title).filter(Boolean));
+  }
+  if (siblingNames.some((name) => String(name).trim().toLocaleLowerCase("vi-VN") === nextLabel.toLocaleLowerCase("vi-VN"))) {
+    return res.status(409).json({ success: false, error: "Tên này đã được sử dụng trong cùng cấp." });
+  }
+  const override = { id: renameKey, kind: "libraryRename", targetKind: kind, section, categoryId, poseId, label: nextLabel, updatedAt: Date.now() };
+  const existingIndex = cloudStore.customCategories.findIndex((item) => item?.id === renameKey);
+  if (existingIndex >= 0) cloudStore.customCategories[existingIndex] = override;
+  else cloudStore.customCategories.push(override);
+  await saveStore();
+  return res.json({ success: true, rename: override });
+}));
+
+app.delete("/api/cloud/pose/:id", asyncRoute(async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const { section, categoryId } = req.body || {};
+  const poseKey = req.params.id;
+  if (!(["kyyeu", "canhan"] as string[]).includes(section) || typeof categoryId !== "string" || !categoryId || !poseKey || poseKey.length > 256) {
+    return res.status(400).json({ success: false, error: "Thông tin dáng cần xóa không hợp lệ." });
+  }
+  const photoIds = cloudStore.photos.filter((photo) => photo.poseKey === poseKey).map((photo) => photo.id);
+  const removed = { photos: photoIds.length, customPoses: cloudStore.customPoses.filter((item) => item.pose?.id === poseKey).length };
+  cloudStore.photos = cloudStore.photos.filter((photo) => photo.poseKey !== poseKey);
+  cloudStore.customPoses = cloudStore.customPoses.filter((item) => item.pose?.id !== poseKey);
+  cloudStore.records = cloudStore.records.filter((record) => {
+    const data = record.data || {};
+    if ((record.type === "favorite" || record.type === "savedPose") && data.poseKey === poseKey) return false;
+    return !(record.type === "setting" && data.sectionKey === section && data.kind === "pose" && data.targetId === poseKey);
+  });
+  cloudStore.customCategories = cloudStore.customCategories.filter((item) => item?.id !== `rename:pose:${section}:${categoryId}:${poseKey}`);
+  if (!cloudStore.deletedPoseKeys.includes(poseKey)) cloudStore.deletedPoseKeys.push(poseKey);
+  await saveStore();
+  return res.json({ success: true, removed });
 }));
 
 // 7. Delete Photo from Cloud Drive (STRICTLY REQUIRES ADMIN)

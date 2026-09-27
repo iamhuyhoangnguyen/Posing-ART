@@ -1,7 +1,7 @@
 import React from "react";
-import { Trash2 } from "lucide-react";
 import type { CategoryItem } from "../types";
 import { OfflineImage } from "./OfflineImage";
+import { AdminItemActionsMenu } from "./AdminItemActionsMenu";
 
 interface CategoryImageCardProps {
   category: CategoryItem;
@@ -10,6 +10,9 @@ interface CategoryImageCardProps {
   onSelect: () => void;
   isAdmin?: boolean;
   onDelete?: () => void;
+  onRename?: () => void;
+  onShare?: () => void;
+  onDownload?: () => void;
 }
 
 const FALLBACK_COVER = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80";
@@ -22,6 +25,9 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
   onSelect,
   isAdmin = false,
   onDelete,
+  onRename,
+  onShare,
+  onDownload,
 }) => (
   <div className="relative">
   <button
@@ -61,16 +67,8 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
       </div>
     </div>
   </button>
-  {isAdmin && onDelete && (
-    <button
-      type="button"
-      onClick={(event) => { event.stopPropagation(); onDelete(); }}
-      aria-label={`Xóa chủ đề ${category.label}`}
-      title={`Xóa chủ đề ${category.label}`}
-      className="absolute left-2.5 top-2.5 z-10 rounded-full border border-white/30 bg-rose-600/90 p-2 text-white shadow-lg transition hover:bg-rose-700 active:scale-95"
-    >
-      <Trash2 className="h-4 w-4" />
-    </button>
+  {isAdmin && onDelete && onRename && onShare && onDownload && (
+    <AdminItemActionsMenu label={category.label} onDelete={onDelete} onRename={onRename} onShare={onShare} onDownload={onDownload} />
   )}
   </div>
 );

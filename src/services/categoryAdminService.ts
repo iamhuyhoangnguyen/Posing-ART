@@ -15,7 +15,7 @@ interface CategoryDeletionRequest {
   poseKeys: string[];
 }
 
-async function adminRequest(path: string, method: "POST" | "DELETE", body: CategoryDeletionRequest) {
+async function adminRequest(path: string, method: "POST" | "DELETE", body: unknown) {
   let user = getCurrentUser();
   let token = getAdminToken() || user?.token || "";
   if (!token) throw new Error("Phiên quản trị viên không hợp lệ. Vui lòng đăng nhập lại.");
@@ -43,6 +43,20 @@ export async function previewCategoryDeletion(request: CategoryDeletionRequest):
 
 export async function deleteCategoryFromCloud(request: CategoryDeletionRequest): Promise<void> {
   await adminRequest(`/api/cloud/category/${encodeURIComponent(request.categoryId)}`, "DELETE", request);
+}
+
+export async function renameLibraryItem(request: {
+  kind: "section" | "category" | "pose";
+  section: "kyyeu" | "canhan";
+  categoryId?: string;
+  poseId?: string;
+  label: string;
+}): Promise<void> {
+  await adminRequest("/api/cloud/library/rename", "POST", request);
+}
+
+export async function deletePoseFromCloud(request: { section: "kyyeu" | "canhan"; categoryId: string; poseKey: string }): Promise<void> {
+  await adminRequest(`/api/cloud/pose/${encodeURIComponent(request.poseKey)}`, "DELETE", request);
 }
 
 export function getDeletedCategoryKeys(): Set<string> {

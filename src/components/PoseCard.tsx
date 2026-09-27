@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { PoseItem } from "../types";
 import { OfflineImage } from "./OfflineImage";
+import { AdminItemActionsMenu } from "./AdminItemActionsMenu";
 
 interface PoseCardProps {
   pose: PoseItem;
@@ -20,6 +21,11 @@ interface PoseCardProps {
   onEditCover?: (e: React.MouseEvent) => void;
   isSelectedForSheet?: boolean;
   onToggleSheetSelection?: (e: React.MouseEvent) => void;
+  isAdmin?: boolean;
+  onAdminRename?: () => void;
+  onAdminDelete?: () => void;
+  onAdminShare?: () => void;
+  onAdminDownload?: () => void;
 }
 
 export const PoseCard: React.FC<PoseCardProps> = ({
@@ -32,16 +38,24 @@ export const PoseCard: React.FC<PoseCardProps> = ({
   onEditCover,
   isSelectedForSheet = false,
   onToggleSheetSelection,
+  isAdmin = false,
+  onAdminRename,
+  onAdminDelete,
+  onAdminShare,
+  onAdminDownload,
 }) => {
   return (
     <div
       onClick={onClick}
-      className={`group relative rounded-3xl overflow-hidden transition-all duration-300 cursor-pointer flex flex-col border select-none ${
+      className={`group relative rounded-3xl transition-all duration-300 cursor-pointer flex flex-col border select-none ${
         isDone
           ? "bg-zinc-50/70 dark:bg-zinc-900/30 border-emerald-300/80 dark:border-emerald-900/60 opacity-70 hover:opacity-95"
           : "bg-white dark:bg-zinc-900 border-zinc-200/90 dark:border-zinc-800 shadow-xs hover:shadow-xl hover:-translate-y-1 hover:border-amber-400 dark:hover:border-amber-600/70"
       } active:scale-[0.98] animate-fadeInUp`}
     >
+      {isAdmin && onAdminRename && onAdminDelete && onAdminShare && onAdminDownload && (
+        <AdminItemActionsMenu label={pose.title} onRename={onAdminRename} onDelete={onAdminDelete} onShare={onAdminShare} onDownload={onAdminDownload} />
+      )}
       {/* Photo Cover Preview Area (REPLACES STICK-FIGURE COMPLETELY) */}
       <div className="relative w-full aspect-[4/3] bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
         {pose.coverImage ? (

@@ -31,6 +31,7 @@ import {
 import { isAdminAuthenticated } from "../utils/adminAuth";
 import { InspirationSearchLink } from "./InspirationSearchLink";
 import { getCurrentUser, isCurrentUserAdmin } from "../utils/userAuth";
+import { serverUrl } from "../services/apiUrl";
 
 interface PoseModalProps {
   pose: PoseItem | null;
@@ -199,7 +200,8 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   };
 
   const hasDraggedFiles = (event: React.DragEvent<HTMLButtonElement>) =>
-    supportsFileDrop && Array.from(event.dataTransfer.types).includes("Files");
+    supportsFileDrop && (Array.from(event.dataTransfer.types).includes("Files") ||
+      ["text/uri-list", "text/html", "text/plain"].some((type) => Array.from(event.dataTransfer.types).includes(type)));
   const handleFileDragEnter = (event: React.DragEvent<HTMLButtonElement>) => {
     if (!hasDraggedFiles(event)) return;
     event.preventDefault();
@@ -218,11 +220,47 @@ export const PoseModal: React.FC<PoseModalProps> = ({
     if (!fileDragDepth.current) setIsDraggingFiles(false);
   };
   const handleFileDrop = (event: React.DragEvent<HTMLButtonElement>) => {
-    if (!supportsFileDrop || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    if (!supportsFileDrop || !hasDraggedFiles(event)) return;
     event.preventDefault();
     fileDragDepth.current = 0;
     setIsDraggingFiles(false);
-    void handleUploadFiles(Array.from(event.dataTransfer.files));
+    const files = Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
+    if (files.length) {
+      void handleUploadFiles(files);
+      return;
+    }
+
+    const transfer = event.dataTransfer;
+    const uriList = transfer.getData("text/uri-list").split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith("#"));
+    const html = transfer.getData("text/html");
+    const htmlUrl = html.match(/<(?:img|source)[^>]+src\s*=\s*["']([^"']+)["']/i)?.[1]
+      || html.match(/<a[^>]+href\s*=\s*["']([^"']+)["']/i)?.[1];
+    const plain = transfer.getData("text/plain").trim();
+    const droppedUrl = (uriList || htmlUrl || plain.match(/https?:\/\/[^\s<>"']+/i)?.[0] || "").replace(/&amp;/gi, "&");
+    if (!droppedUrl) {
+      setPasteToast("Không tìm thấy ảnh hoặc liên kết ảnh trong nội dung đã thả.");
+      setTimeout(() => setPasteToast(null), 4500);
+      return;
+    }
+    void (async () => {
+      setPasteToast("Đang tải ảnh từ liên kết…");
+      try {
+        const response = await fetch(serverUrl("/api/inspiration/fetch-dropped-image"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: droppedUrl }),
+        });
+        const result = await response.json().catch(() => ({})) as { dataUrl?: string; error?: string };
+        if (!response.ok || !result.dataUrl) throw new Error(result.error || `Máy chủ tải ảnh thất bại (${response.status}).`);
+        const imageResponse = await fetch(result.dataUrl);
+        const blob = await imageResponse.blob();
+        const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
+        await handleUploadFiles([new File([blob], `dragged-image.${extension}`, { type: blob.type })]);
+      } catch (error) {
+        setPasteToast(error instanceof Error ? `Không thể thêm ảnh từ liên kết: ${error.message}` : "Không thể thêm ảnh từ liên kết đã thả.");
+        setTimeout(() => setPasteToast(null), 5500);
+      }
+    })();
   };
 
   const photoFileName = (photo: PhotoRecord) => {
