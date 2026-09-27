@@ -1619,6 +1619,7 @@ function getAiErrorMessage(error: any, fallback: string): string {
 
 // 1. Analyze Pose using gemini-3.1-pro-preview
 app.post("/api/ai/creative-chat", async (req, res) => {
+  let activeModel = "gemini-3.6-flash";
   try {
     const {
       model = "chatgpt",
@@ -1714,7 +1715,7 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
 
     let response: any = null;
     const chatModels = ["gemini-3.6-flash", "gemini-3.8-flash"];
-    let activeModel = chatModels[0];
+    activeModel = chatModels[0];
     response = await withGeminiUnavailableRetry(
       () => withAiTimeout(ai.models.generateContent({ model: activeModel, contents: { parts } })),
       {
@@ -1733,7 +1734,13 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
       reply,
     });
   } catch (error: any) {
-    console.error("Creative chat error:", error);
+    console.error("[AI Creative] Gemini generateContent failed", {
+      route: "/api/ai/creative-chat",
+      model: activeModel,
+      endpoint: `models/${activeModel}:generateContent`,
+      upstreamStatus: error?.status || error?.code,
+      message: error?.message,
+    });
     res.status(error?.code === "AI_TIMEOUT" ? 504 : 502).json({
       error: getAiErrorMessage(error, "Lỗi xử lý yêu cầu sáng tạo ý tưởng AI."),
     });

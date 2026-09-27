@@ -3,6 +3,11 @@ import { ExternalLink, Copy, Check, Sparkles, Globe, RefreshCw, LoaderCircle } f
 import { InspirationSearchLink } from "./InspirationSearchLink";
 import { serverUrl } from "../services/apiUrl";
 import {
+  INSPIRATION_SUGGESTION_TTL_MS,
+  readInspirationSuggestionCache,
+  writeInspirationSuggestionCache,
+} from "../utils/inspirationSuggestionCache";
+import {
   getPinterestSearchUrl,
   getRednoteSearchUrl,
   getInspirationSearchQuery,
@@ -16,7 +21,7 @@ interface InspirationBarProps {
   poseTitles: string[];
 }
 
-const suggestionCache = new Map<string, string[]>();
+const suggestionCache = new Map<string, { suggestions: string[]; savedAt?: number }>();
 const suggestionHistory = new Map<string, string[][]>();
 const suggestionRequests = new Map<string, Promise<string[]>>();
 
@@ -50,7 +55,11 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
   const [copiedType, setCopiedType] = useState<string | null>(null);
   const fallbackSuggestions = useMemo(() => getFallbackSuggestions(categoryId, categoryLabel), [categoryId, categoryLabel]);
   const poseContext = poseTitles.slice(0, 60).join("; ");
-  const [suggestions, setSuggestions] = useState<string[]>(() => suggestionCache.get(categoryId) || fallbackSuggestions);
+  const [suggestions, setSuggestions] = useState<string[]>(() =>
+    suggestionCache.get(categoryId)?.suggestions
+      || readInspirationSuggestionCache(categoryId)?.suggestions
+      || fallbackSuggestions,
+  );
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
   const pUrl = getPinterestSearchUrl(categoryId, categoryLabel);
@@ -60,13 +69,25 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
     if (!forceRefresh) {
       const cached = suggestionCache.get(categoryId);
       if (cached) {
-        if (isCurrent()) setSuggestions(cached);
+        if (cached.savedAt === undefined || Date.now() - cached.savedAt < INSPIRATION_SUGGESTION_TTL_MS) {
+          if (isCurrent()) setSuggestions(cached.suggestions);
+          return;
+        }
+        suggestionCache.delete(categoryId);
+      }
+      const persisted = readInspirationSuggestionCache(categoryId);
+      if (persisted) {
+        suggestionCache.set(categoryId, { suggestions: persisted.suggestions, savedAt: persisted.savedAt });
+        suggestionHistory.set(categoryId, persisted.history);
+        if (isCurrent()) setSuggestions(persisted.suggestions);
         return;
       }
     }
 
     if (isCurrent()) setIsLoadingSuggestions(true);
-    const previous = suggestionHistory.get(categoryId) || [];
+    const previous = suggestionHistory.get(categoryId)
+      || readInspirationSuggestionCache(categoryId)?.history
+      || [];
     const prompt = [
       "Tạo đúng 8 cụm từ tìm kiếm ngắn bằng tiếng Việt cho ảnh tạo dáng/chụp chân dung.",
       "Mỗi dòng chỉ có một cụm 2-5 từ, không đánh số, không giải thích, không Markdown.",
@@ -95,7 +116,9 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
         if (generated.length < 6) throw new Error("AI chưa trả về đủ cụm gợi ý.");
         const nextHistory = [[...generated], ...previous.filter((set) => set.join("|") !== generated.join("|"))].slice(0, 3);
         suggestionHistory.set(categoryId, nextHistory);
-        suggestionCache.set(categoryId, generated);
+        const savedAt = Date.now();
+        suggestionCache.set(categoryId, { suggestions: generated, savedAt });
+        writeInspirationSuggestionCache(categoryId, { suggestions: generated, history: nextHistory, savedAt });
         return generated;
       })();
       suggestionRequests.set(categoryId, request);
@@ -107,7 +130,7 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
     } catch (error) {
       console.warn(`Could not generate inspiration tags for ${categoryLabel}:`, error);
       const fallback = getFallbackSuggestions(categoryId, categoryLabel);
-      suggestionCache.set(categoryId, fallback);
+      suggestionCache.set(categoryId, { suggestions: fallback });
       if (isCurrent()) setSuggestions(fallback);
     } finally {
       if (suggestionRequests.get(categoryId) === request) suggestionRequests.delete(categoryId);
