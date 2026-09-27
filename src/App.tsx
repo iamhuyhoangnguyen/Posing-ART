@@ -872,8 +872,11 @@ export default function App() {
             )}
             {currentCategory && isCategoryDetailOpen && (
               <InspirationBar
+                key={currentCategory.id}
                 categoryId={currentCategory.id}
                 categoryLabel={currentCategory.label}
+                categoryDescription={currentCategory.description}
+                poseTitles={currentCategory.poses.map((pose) => pose.title)}
               />
             )}
             {currentCategory && isCategoryDetailOpen && (

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { ExternalLink, Copy, Check, Sparkles, Globe } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ExternalLink, Copy, Check, Sparkles, Globe, RefreshCw, LoaderCircle } from "lucide-react";
 import { InspirationSearchLink } from "./InspirationSearchLink";
+import { serverUrl } from "../services/apiUrl";
 import {
   getPinterestSearchUrl,
   getRednoteSearchUrl,
@@ -11,18 +12,114 @@ import {
 interface InspirationBarProps {
   categoryId: string;
   categoryLabel: string;
+  categoryDescription?: string;
+  poseTitles: string[];
+}
+
+const suggestionCache = new Map<string, string[]>();
+const suggestionHistory = new Map<string, string[][]>();
+const suggestionRequests = new Map<string, Promise<string[]>>();
+
+function getFallbackSuggestions(categoryId: string, categoryLabel: string): string[] {
+  const oldSuggestions = CONCEPT_INSPIRATION_MAP[categoryId]?.recommendedTags;
+  return oldSuggestions?.length
+    ? oldSuggestions
+    : [`${categoryLabel} chân dung`, "Góc nghiêng ánh nắng", "Tương tác đạo cụ", "Bước đi tự nhiên", "Cận cảnh biểu cảm", "Tạo dáng ngồi đẹp"];
+}
+
+function parseSuggestionReply(reply: unknown, oldSuggestions: string[]): string[] {
+  if (typeof reply !== "string") return [];
+  const oldSet = new Set(oldSuggestions.map((tag) => tag.toLocaleLowerCase("vi-VN").trim()));
+  const lines = reply
+    .replace(/```(?:json)?/gi, "")
+    .split(/[\n,;]+/)
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/, "").replace(/^\s*\[|\]\s*$/g, "").replace(/^['"“”]|['"“”]$/g, "").replace(/[*`]/g, "").trim())
+    .filter((line) => {
+      const wordCount = line.split(/\s+/).filter(Boolean).length;
+      return wordCount >= 2 && wordCount <= 5 && !oldSet.has(line.toLocaleLowerCase("vi-VN"));
+    });
+  return [...new Set(lines)].slice(0, 8);
 }
 
 export const InspirationBar: React.FC<InspirationBarProps> = ({
   categoryId,
   categoryLabel,
+  categoryDescription = "",
+  poseTitles,
 }) => {
   const [copiedType, setCopiedType] = useState<string | null>(null);
+  const fallbackSuggestions = useMemo(() => getFallbackSuggestions(categoryId, categoryLabel), [categoryId, categoryLabel]);
+  const poseContext = poseTitles.slice(0, 60).join("; ");
+  const [suggestions, setSuggestions] = useState<string[]>(() => suggestionCache.get(categoryId) || fallbackSuggestions);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
 
   const pUrl = getPinterestSearchUrl(categoryId, categoryLabel);
   const rUrl = getRednoteSearchUrl(categoryId, categoryLabel);
   const queries = getInspirationSearchQuery(categoryId, categoryLabel);
-  const conceptMeta = CONCEPT_INSPIRATION_MAP[categoryId];
+  const generateSuggestions = useCallback(async (forceRefresh: boolean, isCurrent: () => boolean = () => true) => {
+    if (!forceRefresh) {
+      const cached = suggestionCache.get(categoryId);
+      if (cached) {
+        if (isCurrent()) setSuggestions(cached);
+        return;
+      }
+    }
+
+    if (isCurrent()) setIsLoadingSuggestions(true);
+    const previous = suggestionHistory.get(categoryId) || [];
+    const prompt = [
+      "Tạo đúng 8 cụm từ tìm kiếm ngắn bằng tiếng Việt cho ảnh tạo dáng/chụp chân dung.",
+      "Mỗi dòng chỉ có một cụm 2-5 từ, không đánh số, không giải thích, không Markdown.",
+      "Gợi ý phải bám sát concept, đa dạng góc máy, tư thế, cảm xúc, đạo cụ hoặc bối cảnh; tránh sáo rỗng và chung chung.",
+      "Không lặp lại những tag cố định cũ dưới đây và không lặp các gợi ý gần nhất.",
+      `Tên concept: ${categoryLabel}`,
+      categoryDescription ? `Mô tả/bối cảnh: ${categoryDescription}` : "",
+      poseContext ? `Tên dáng đã có trong concept: ${poseContext}` : "",
+      `Tag tĩnh cần tránh: ${fallbackSuggestions.join("; ")}`,
+      previous.length ? `Các bộ gợi ý gần nhất cần tránh: ${previous.map((set) => set.join("; ")).join(" | ")}` : "",
+      forceRefresh ? "Lần làm mới này cần tạo một bộ khác rõ rệt so với bộ đang hiển thị." : "",
+    ].filter(Boolean).join("\n");
+
+    let request = !forceRefresh ? suggestionRequests.get(categoryId) : undefined;
+    if (!request) {
+      request = (async () => {
+        const response = await fetch(serverUrl("/api/ai/creative-chat"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(45_000),
+          body: JSON.stringify({ model: "gemini", task: "quick-inspiration-tags", message: prompt }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Không thể tạo gợi ý lúc này.");
+        const generated = parseSuggestionReply(data.reply, fallbackSuggestions);
+        if (generated.length < 6) throw new Error("AI chưa trả về đủ cụm gợi ý.");
+        const nextHistory = [[...generated], ...previous.filter((set) => set.join("|") !== generated.join("|"))].slice(0, 3);
+        suggestionHistory.set(categoryId, nextHistory);
+        suggestionCache.set(categoryId, generated);
+        return generated;
+      })();
+      suggestionRequests.set(categoryId, request);
+    }
+
+    try {
+      const generated = await request;
+      if (isCurrent()) setSuggestions(generated);
+    } catch (error) {
+      console.warn(`Could not generate inspiration tags for ${categoryLabel}:`, error);
+      const fallback = getFallbackSuggestions(categoryId, categoryLabel);
+      suggestionCache.set(categoryId, fallback);
+      if (isCurrent()) setSuggestions(fallback);
+    } finally {
+      if (suggestionRequests.get(categoryId) === request) suggestionRequests.delete(categoryId);
+      if (isCurrent()) setIsLoadingSuggestions(false);
+    }
+  }, [categoryId, categoryLabel, categoryDescription, poseContext, fallbackSuggestions]);
+
+  useEffect(() => {
+    let active = true;
+    void generateSuggestions(false, () => active);
+    return () => { active = false; };
+  }, [generateSuggestions]);
 
   const handleCopy = (text: string, type: string) => {
     navigator.clipboard.writeText(text);
@@ -97,12 +194,13 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
       </div>
 
       {/* Suggested Sub-Tags */}
-      {conceptMeta?.recommendedTags && conceptMeta.recommendedTags.length > 0 && (
+      {suggestions.length > 0 && (
         <div className="mt-2.5 pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mr-1">
-            Gợi ý nhanh:
+            Gợi ý nhanh{isLoadingSuggestions ? " · Đang tạo" : ":"}
           </span>
-          {conceptMeta.recommendedTags.map((tag, idx) => (
+          {isLoadingSuggestions && <LoaderCircle className="w-3.5 h-3.5 text-amber-500 animate-spin" aria-label="Đang tạo gợi ý" />}
+          {suggestions.map((tag, idx) => (
             <InspirationSearchLink
               provider="pinterest"
               key={idx}
@@ -113,6 +211,16 @@ export const InspirationBar: React.FC<InspirationBarProps> = ({
               <ExternalLink className="w-2.5 h-2.5 opacity-50" />
             </InspirationSearchLink>
           ))}
+          <button
+            type="button"
+            onClick={() => void generateSuggestions(true)}
+            disabled={isLoadingSuggestions}
+            title="Tạo bộ gợi ý khác cho concept này"
+            className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 px-2.5 py-1 rounded-lg border border-amber-200/70 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900 disabled:opacity-50 inline-flex items-center gap-1 transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${isLoadingSuggestions ? "animate-spin" : ""}`} />
+            Làm mới gợi ý
+          </button>
         </div>
       )}
     </div>

@@ -1629,7 +1629,13 @@ app.post("/api/ai/creative-chat", async (req, res) => {
       message,
       image,
       mimeType = "image/jpeg",
+      task,
     } = req.body;
+    const isQuickInspirationTask = task === "quick-inspiration-tags";
+
+    if (task !== undefined && !isQuickInspirationTask) {
+      return res.status(400).json({ error: "Loại yêu cầu sáng tạo không hợp lệ." });
+    }
 
     if (!message && !image) {
       return res.status(400).json({ error: "Vui lòng nhập câu hỏi hoặc gửi ảnh." });
@@ -1669,6 +1675,9 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
 `;
 
     if (!process.env.GEMINI_API_KEY) {
+      if (isQuickInspirationTask) {
+        return res.status(503).json({ error: "AI tạo gợi ý hiện chưa sẵn sàng." });
+      }
       // Fallback creative response when API key is not yet set
       const fallbackChinese = model === "claude" ? "法式复古人像写真 氛围感拍照姿势" : "女生写真创意 拍照姿势灵感 青春感";
       return res.json({
@@ -1701,7 +1710,9 @@ Hãy cấu trúc câu trả lời mạch lạc theo các mục sau (dùng địn
       });
     } else {
       parts.push({
-        text: `Câu hỏi / yêu cầu ý tưởng từ người dùng: "${message}".\n\n${systemPrompt}`,
+        text: isQuickInspirationTask
+          ? `Bạn đang tạo cụm từ tìm kiếm Pinterest cho ý tưởng chụp ảnh. Làm theo yêu cầu và dữ liệu concept sau; chỉ trả về 6-8 dòng, mỗi dòng một cụm 2-5 từ, không đánh số, không giải thích, không Markdown. Tạo các ý khác nhau về góc chụp, dáng, cảm xúc, đạo cụ và bối cảnh; tuyệt đối tránh những tag cũ hoặc gợi ý gần đây được liệt kê.\n\n${message}`
+          : `Câu hỏi / yêu cầu ý tưởng từ người dùng: "${message}".\n\n${systemPrompt}`,
       });
     }
 
