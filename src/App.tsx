@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
+import React, { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { App as CapacitorApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
 import {
@@ -12,7 +12,6 @@ import {
   Flame,
   ChevronLeft,
   ChevronRight,
-  Type,
   Trash2,
   X,
   Pencil,
@@ -51,11 +50,12 @@ import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purge
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
 import { isAdminAuthenticated } from "./utils/adminAuth";
-import { motion, type Variants } from "framer-motion";
+import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
 import { categoryGalleryKey, UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_LABEL } from "./utils/categoryGallery";
 import { serverUrl } from "./services/apiUrl";
+import { SectionCoverActionsMenu } from "./components/SectionCoverActionsMenu";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -234,6 +234,7 @@ export default function App() {
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
   const [flatGalleryPhotos, setFlatGalleryPhotos] = useState<PhotoRecord[]>([]);
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState<number | null>(null);
+  const [gallerySlideDirection, setGallerySlideDirection] = useState(1);
   const galleryTouchStartX = useRef<number | null>(null);
 
   // Modals state
@@ -651,30 +652,32 @@ export default function App() {
           : ""),
         cloudId: image.photoId,
         localPhoto: localPhotoEntry?.photo,
+        canDelete: Boolean(image.photoId || localPhotoEntry),
       };
     }).filter((item) => Boolean(item.url));
     for (const { photo, url } of galleryPhotoUrls) {
       if (!photo.cloudId || !(currentCategory?.images || []).some((image) => image.photoId === photo.cloudId)) {
-        items.push({ key: `local-${photo.id}`, url, cloudId: photo.cloudId, localPhoto: photo });
+        items.push({ key: `local-${photo.id}`, url, cloudId: photo.cloudId, localPhoto: photo, canDelete: true });
       }
     }
     return items;
   }, [displayedGalleryImages, galleryPhotoUrls, currentCategory?.images]);
+  const moveGallery = useCallback((direction: -1 | 1) => {
+    if (galleryViewerItems.length < 2) return;
+    setGallerySlideDirection(direction);
+    setGalleryLightboxIndex((index) => index === null ? null : (index + direction + galleryViewerItems.length) % galleryViewerItems.length);
+  }, [galleryViewerItems.length]);
   useEffect(() => setGalleryLightboxIndex(null), [galleryKey]);
   useEffect(() => {
     if (galleryLightboxIndex === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setGalleryLightboxIndex(null);
-      if (event.key === "ArrowLeft" && galleryViewerItems.length > 1) {
-        setGalleryLightboxIndex((index) => index === null ? null : (index - 1 + galleryViewerItems.length) % galleryViewerItems.length);
-      }
-      if (event.key === "ArrowRight" && galleryViewerItems.length > 1) {
-        setGalleryLightboxIndex((index) => index === null ? null : (index + 1) % galleryViewerItems.length);
-      }
+      if (event.key === "ArrowLeft") moveGallery(-1);
+      if (event.key === "ArrowRight") moveGallery(1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [galleryLightboxIndex, galleryViewerItems.length]);
+  }, [galleryLightboxIndex, galleryViewerItems.length, moveGallery]);
 
   const deleteGalleryViewerItem = async () => {
     const item = galleryLightboxIndex === null ? undefined : galleryViewerItems[galleryLightboxIndex];
@@ -704,9 +707,7 @@ export default function App() {
     const startX = galleryTouchStartX.current;
     galleryTouchStartX.current = null;
     if (galleryLightboxIndex === null || startX === null || endX === undefined || Math.abs(endX - startX) < 45 || galleryViewerItems.length < 2) return;
-    setGalleryLightboxIndex((index) => index === null ? null : endX < startX
-      ? (index + 1) % galleryViewerItems.length
-      : (index - 1 + galleryViewerItems.length) % galleryViewerItems.length);
+    moveGallery(endX < startX ? 1 : -1);
   };
 
   const openCategoryGallery = () => {
@@ -1146,26 +1147,17 @@ export default function App() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
-                {/* EDIT COVER PENCIL BUTTON */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveEditCover({
-                      type: "section",
-                      sectionKey: "kyyeu",
-                      title: "Ảnh Đại Diện: KỶ YẾU",
-                      subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
-                      currentImage: kyyeuCover,
-                    });
-                  }}
-                  title="Chỉnh sửa ảnh đại diện Kỷ Yếu"
-                  className="absolute top-4 left-4 px-2.5 py-1.5 rounded-full bg-black/50 hover:bg-amber-500 text-white text-xs font-semibold backdrop-blur-md transition-colors flex items-center gap-1.5 shadow-md active:scale-90"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Đổi ảnh bìa</span>
-                </button>
-
-                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("kyyeu"); }} aria-label="Đổi tên Phần 1" title="Đổi tên Phần 1" className="absolute top-4 left-[10.5rem] inline-flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur hover:bg-amber-500"><Type className="h-3.5 w-3.5" /><span className="hidden sm:inline">Đổi tên</span></button>}
+                <SectionCoverActionsMenu
+                  sectionLabel="Kỷ Yếu"
+                  onChangeCover={() => setActiveEditCover({
+                    type: "section",
+                    sectionKey: "kyyeu",
+                    title: "Ảnh Đại Diện: KỶ YẾU",
+                    subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
+                    currentImage: kyyeuCover,
+                  })}
+                  onRename={isCurrentUserAdmin() ? () => promptRenameSection("kyyeu") : undefined}
+                />
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.kyyeuTotal} ảnh
@@ -1214,26 +1206,17 @@ export default function App() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
-                {/* EDIT COVER PENCIL BUTTON */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveEditCover({
-                      type: "section",
-                      sectionKey: "canhan",
-                      title: "Ảnh Đại Diện: CONCEPT CÁ NHÂN",
-                      subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
-                      currentImage: canhanCover,
-                    });
-                  }}
-                  title="Chỉnh sửa ảnh đại diện Concept Cá Nhân"
-                  className="absolute top-4 left-4 px-2.5 py-1.5 rounded-full bg-black/50 hover:bg-amber-500 text-white text-xs font-semibold backdrop-blur-md transition-colors flex items-center gap-1.5 shadow-md active:scale-90"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Đổi ảnh bìa</span>
-                </button>
-
-                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("canhan"); }} aria-label="Đổi tên Phần 2" title="Đổi tên Phần 2" className="absolute top-4 left-[10.5rem] inline-flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur hover:bg-amber-500"><Type className="h-3.5 w-3.5" /><span className="hidden sm:inline">Đổi tên</span></button>}
+                <SectionCoverActionsMenu
+                  sectionLabel="Concept Cá Nhân"
+                  onChangeCover={() => setActiveEditCover({
+                    type: "section",
+                    sectionKey: "canhan",
+                    title: "Ảnh Đại Diện: CONCEPT CÁ NHÂN",
+                    subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
+                    currentImage: canhanCover,
+                  })}
+                  onRename={isCurrentUserAdmin() ? () => promptRenameSection("canhan") : undefined}
+                />
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.canhanTotal} ảnh
@@ -1676,12 +1659,24 @@ export default function App() {
         >
           <button type="button" aria-label="Đóng ảnh" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex(null); }} className="absolute right-4 top-4 rounded-full bg-zinc-800/80 p-3 text-white"><X className="h-5 w-5" /></button>
           {galleryViewerItems.length > 1 && <>
-            <button type="button" aria-label="Ảnh trước" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex((galleryLightboxIndex - 1 + galleryViewerItems.length) % galleryViewerItems.length); }} className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronLeft className="h-6 w-6" /></button>
-            <button type="button" aria-label="Ảnh tiếp theo" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex((galleryLightboxIndex + 1) % galleryViewerItems.length); }} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronRight className="h-6 w-6" /></button>
+            <button type="button" aria-label="Ảnh trước" onClick={(event) => { event.stopPropagation(); moveGallery(-1); }} className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronLeft className="h-6 w-6" /></button>
+            <button type="button" aria-label="Ảnh tiếp theo" onClick={(event) => { event.stopPropagation(); moveGallery(1); }} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronRight className="h-6 w-6" /></button>
             <span className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-semibold text-white">{galleryLightboxIndex + 1} / {galleryViewerItems.length}</span>
           </>}
-          <img src={galleryViewerItems[galleryLightboxIndex].url} alt="Ảnh tham khảo trong danh mục" className="max-h-[82vh] max-w-full rounded-xl object-contain" onClick={(event) => event.stopPropagation()} />
-          {(galleryViewerItems[galleryLightboxIndex].cloudId || galleryViewerItems[galleryLightboxIndex].localPhoto) && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.img
+              key={galleryViewerItems[galleryLightboxIndex].key}
+              src={galleryViewerItems[galleryLightboxIndex].url}
+              alt="Ảnh tham khảo trong danh mục"
+              initial={{ opacity: 0, x: gallerySlideDirection * 36, scale: 0.985 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: gallerySlideDirection * -24, scale: 0.99 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="max-h-[82vh] max-w-full rounded-xl object-contain"
+              onClick={(event) => event.stopPropagation()}
+            />
+          </AnimatePresence>
+          {galleryViewerItems[galleryLightboxIndex].canDelete && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
             <button type="button" onClick={(event) => { event.stopPropagation(); void deleteGalleryViewerItem(); }} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">
               <Trash2 className="h-4 w-4" /> Xóa ảnh
             </button>

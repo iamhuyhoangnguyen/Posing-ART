@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "3.0.1";
-export const APP_BUILD_NUMBER = 301;
+export const APP_VERSION = "3.0.2";
+export const APP_BUILD_NUMBER = 302;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 3.0.2: phân biệt ảnh tải lên với ảnh mặc định, chuyển ảnh mượt hơn và gộp thao tác ảnh bìa/đổi tên vào menu.",
   "Phiên bản 3.0.1: sửa thao tác xóa và lướt ảnh trong thư viện, căn lại nút chỉnh sửa ảnh bìa.",
   "Phiên bản 3.0.0: thư viện ảnh phẳng theo danh mục, tối đa 100 ảnh và tìm ảnh tương tự bằng Google Lens.",
   "Phiên bản 2.9.0: kéo thả ảnh/link Pinterest-RedNote, đổi tên và quản lý danh mục/dáng bằng menu Admin.",
