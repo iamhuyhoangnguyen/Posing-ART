@@ -208,6 +208,11 @@ export async function remapPhotosToCategoryGalleries(keyMap: Map<string, string>
 }
 
 export async function deletePhoto(id: number, cloudId?: string): Promise<void> {
+  if (cloudId) {
+    const { deletePhotoFromCloud } = await import("./cloudSync");
+    await deletePhotoFromCloud(cloudId);
+  }
+
   const db = await openDatabase();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -218,14 +223,6 @@ export async function deletePhoto(id: number, cloudId?: string): Promise<void> {
     req.onerror = () => reject(req.error);
   });
 
-  // Delete from Cloud Drive as well if it has a cloudId
-  if (cloudId) {
-    import("./cloudSync").then(({ deletePhotoFromCloud }) => {
-      deletePhotoFromCloud(cloudId).catch((e) =>
-        console.warn("Cloud photo delete sync warning:", e)
-      );
-    });
-  }
 }
 
 /** Remove cached reference photos locally after an administrator deleted their topic on the server. */

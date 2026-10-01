@@ -332,9 +332,14 @@ export const PoseModal: React.FC<PoseModalProps> = ({
 
   const executeDeletePhoto = async (photo: PhotoRecord) => {
     if (window.confirm("Bạn có chắc muốn xóa ảnh tham khảo này khỏi máy và Cloud Drive?")) {
-      await deletePhoto(photo.id, photo.cloudId);
-      await loadPhotos();
-      onPhotosUpdated();
+      try {
+        await deletePhoto(photo.id, photo.cloudId);
+        await loadPhotos();
+        onPhotosUpdated();
+      } catch (error) {
+        setPermissionNotice(error instanceof Error ? error.message : "Không thể xóa ảnh. Hãy thử lại.");
+        window.setTimeout(() => setPermissionNotice(null), 4500);
+      }
     }
   };
 

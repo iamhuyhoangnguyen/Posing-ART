@@ -10,7 +10,11 @@ import {
   BookOpen,
   Image as ImageIcon,
   Flame,
+  ChevronLeft,
   ChevronRight,
+  Type,
+  Trash2,
+  X,
   Pencil,
   Smartphone,
   Download,
@@ -25,7 +29,7 @@ import {
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PhotoRecord, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
-import { getPhotoCounts, deletePhotosForPoses, getPhotosForPose } from "./utils/db";
+import { getPhotoCounts, deletePhotosForPoses, getPhotosForPose, deletePhoto } from "./utils/db";
 import { Header } from "./components/Header";
 import { CategoryImageCard } from "./components/CategoryImageCard";
 import { GalleryImageCard } from "./components/GalleryImageCard";
@@ -46,6 +50,7 @@ import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
+import { isAdminAuthenticated } from "./utils/adminAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
@@ -228,7 +233,8 @@ export default function App() {
   // Photo counts map from IndexedDB
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
   const [flatGalleryPhotos, setFlatGalleryPhotos] = useState<PhotoRecord[]>([]);
-  const [lightboxImageUrl, setLightboxImageUrl] = useState<string | null>(null);
+  const [galleryLightboxIndex, setGalleryLightboxIndex] = useState<number | null>(null);
+  const galleryTouchStartX = useRef<number | null>(null);
 
   // Modals state
   const [activePoseModal, setActivePoseModal] = useState<{
@@ -633,6 +639,75 @@ export default function App() {
     url: URL.createObjectURL(photo.blob),
   })), [flatGalleryPhotos]);
   useEffect(() => () => galleryPhotoUrls.forEach(({ url }) => URL.revokeObjectURL(url)), [galleryPhotoUrls]);
+  const galleryViewerItems = useMemo(() => {
+    const items = displayedGalleryImages.map((image) => {
+      const localPhotoEntry = image.photoId
+        ? galleryPhotoUrls.find(({ photo }) => photo.cloudId === image.photoId)
+        : undefined;
+      return {
+        key: image.id,
+        url: localPhotoEntry?.url || image.imageUrl || (image.photoId
+          ? serverUrl(`/api/cloud/photo/${encodeURIComponent(image.photoId)}/image`)
+          : ""),
+        cloudId: image.photoId,
+        localPhoto: localPhotoEntry?.photo,
+      };
+    }).filter((item) => Boolean(item.url));
+    for (const { photo, url } of galleryPhotoUrls) {
+      if (!photo.cloudId || !(currentCategory?.images || []).some((image) => image.photoId === photo.cloudId)) {
+        items.push({ key: `local-${photo.id}`, url, cloudId: photo.cloudId, localPhoto: photo });
+      }
+    }
+    return items;
+  }, [displayedGalleryImages, galleryPhotoUrls, currentCategory?.images]);
+  useEffect(() => setGalleryLightboxIndex(null), [galleryKey]);
+  useEffect(() => {
+    if (galleryLightboxIndex === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setGalleryLightboxIndex(null);
+      if (event.key === "ArrowLeft" && galleryViewerItems.length > 1) {
+        setGalleryLightboxIndex((index) => index === null ? null : (index - 1 + galleryViewerItems.length) % galleryViewerItems.length);
+      }
+      if (event.key === "ArrowRight" && galleryViewerItems.length > 1) {
+        setGalleryLightboxIndex((index) => index === null ? null : (index + 1) % galleryViewerItems.length);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [galleryLightboxIndex, galleryViewerItems.length]);
+
+  const deleteGalleryViewerItem = async () => {
+    const item = galleryLightboxIndex === null ? undefined : galleryViewerItems[galleryLightboxIndex];
+    if (!item || (!item.cloudId && !item.localPhoto) || !(isCurrentUserAdmin() || isAdminAuthenticated())) return;
+    if (!window.confirm("Bạn có chắc muốn xóa ảnh này khỏi danh mục và Cloud Drive?")) return;
+    try {
+      if (item.localPhoto) await deletePhoto(item.localPhoto.id, item.cloudId);
+      else if (item.cloudId) {
+        const { deletePhotoFromCloud } = await import("./utils/cloudSync");
+        await deletePhotoFromCloud(item.cloudId);
+      }
+      if (item.cloudId && currentCategory) {
+        const removePhotoReference = (categories: CategoryItem[]) => categories.map((category) => category.id === currentCategory.id
+          ? { ...category, images: (category.images || []).filter((image) => image.photoId !== item.cloudId) }
+          : category);
+        if (currentSection === "kyyeu") setKyyeuData(removePhotoReference);
+        else if (currentSection === "canhan") setCanhanData(removePhotoReference);
+      }
+      setGalleryLightboxIndex(null);
+      await refreshCategoryGalleryPhotos();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể xóa ảnh. Hãy thử lại khi có kết nối và quyền quản trị.");
+    }
+  };
+
+  const handleGallerySwipeEnd = (endX?: number) => {
+    const startX = galleryTouchStartX.current;
+    galleryTouchStartX.current = null;
+    if (galleryLightboxIndex === null || startX === null || endX === undefined || Math.abs(endX - startX) < 45 || galleryViewerItems.length < 2) return;
+    setGalleryLightboxIndex((index) => index === null ? null : endX < startX
+      ? (index + 1) % galleryViewerItems.length
+      : (index - 1 + galleryViewerItems.length) % galleryViewerItems.length);
+  };
 
   const openCategoryGallery = () => {
     if (!currentCategory || !galleryKey) return;
@@ -1090,7 +1165,7 @@ export default function App() {
                   <span className="hidden sm:inline">Đổi ảnh bìa</span>
                 </button>
 
-                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("kyyeu"); }} aria-label="Đổi tên Phần 1" title="Đổi tên Phần 1" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
+                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("kyyeu"); }} aria-label="Đổi tên Phần 1" title="Đổi tên Phần 1" className="absolute top-4 left-[10.5rem] inline-flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur hover:bg-amber-500"><Type className="h-3.5 w-3.5" /><span className="hidden sm:inline">Đổi tên</span></button>}
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.kyyeuTotal} ảnh
@@ -1158,7 +1233,7 @@ export default function App() {
                   <span className="hidden sm:inline">Đổi ảnh bìa</span>
                 </button>
 
-                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("canhan"); }} aria-label="Đổi tên Phần 2" title="Đổi tên Phần 2" className="absolute top-4 left-[8.5rem] rounded-full bg-black/60 p-2 text-white backdrop-blur hover:bg-amber-500"><Pencil className="h-4 w-4" /></button>}
+                {isCurrentUserAdmin() && <button type="button" onClick={(event) => { event.stopPropagation(); promptRenameSection("canhan"); }} aria-label="Đổi tên Phần 2" title="Đổi tên Phần 2" className="absolute top-4 left-[10.5rem] inline-flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur hover:bg-amber-500"><Type className="h-3.5 w-3.5" /><span className="hidden sm:inline">Đổi tên</span></button>}
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
                   {stats.canhanTotal} ảnh
@@ -1521,20 +1596,14 @@ export default function App() {
             {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
             {isCategoryDetailOpen && (displayedGalleryImages.length > 0 || currentCategoryMatchesSearch && galleryPhotoUrls.length > 0 || !searchQuery.trim()) ? (
       <div className="grid grid-cols-2 gap-3 pt-1">
-                {displayedGalleryImages.map((galleryImage) => {
-                  const localPhoto = galleryImage.photoId
-                    ? galleryPhotoUrls.find(({ photo }) => photo.cloudId === galleryImage.photoId)
-                    : undefined;
-                  const imageUrl = localPhoto?.url || galleryImage.imageUrl || (galleryImage.photoId
-                    ? serverUrl(`/api/cloud/photo/${encodeURIComponent(galleryImage.photoId)}/image`)
-                    : undefined);
-                  const similarImageUrl = galleryImage.photoId
-                    ? serverUrl(`/api/cloud/photo/${encodeURIComponent(galleryImage.photoId)}/image`)
-                    : galleryImage.imageUrl;
-                  return <GalleryImageCard key={galleryImage.id} imageUrl={imageUrl} label={currentCategory.label} onOpen={() => imageUrl && setLightboxImageUrl(imageUrl)} similarImageUrl={similarImageUrl} />;
-                })}
-                {galleryPhotoUrls.filter(({ photo }) => !photo.cloudId || !(currentCategory.images || []).some((image) => image.photoId === photo.cloudId)).map(({ photo, url }) => (
-                  <GalleryImageCard key={`local-${photo.id}`} imageUrl={url} label={currentCategory.label} onOpen={() => setLightboxImageUrl(url)} similarImageUrl={photo.cloudId ? serverUrl(`/api/cloud/photo/${encodeURIComponent(photo.cloudId)}/image`) : undefined} />
+                {galleryViewerItems.map((item, index) => (
+                  <GalleryImageCard
+                    key={item.key}
+                    imageUrl={item.url}
+                    label={currentCategory.label}
+                    onOpen={() => setGalleryLightboxIndex(index)}
+                    similarImageUrl={item.cloudId ? serverUrl(`/api/cloud/photo/${encodeURIComponent(item.cloudId)}/image`) : undefined}
+                  />
                 ))}
                 <button type="button" onClick={openCategoryGallery} className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 bg-white/60 text-xs font-bold text-zinc-500 hover:border-amber-500 hover:text-amber-600 dark:border-zinc-700 dark:bg-zinc-900/60">
                   <Plus className="h-6 w-6" />Thêm ảnh vào danh mục
@@ -1593,11 +1662,30 @@ export default function App() {
         </button>
       </div>
 
-      {/* MODAL 1: POSE DETAIL */}
-      {lightboxImageUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="Xem ảnh gallery" onClick={() => setLightboxImageUrl(null)}>
-          <button type="button" aria-label="Đóng ảnh" onClick={() => setLightboxImageUrl(null)} className="absolute right-4 top-4 rounded-full bg-black/60 px-3 py-2 text-sm font-bold text-white">Đóng</button>
-          <img src={lightboxImageUrl} alt="Ảnh tham khảo trong danh mục" className="max-h-[90vh] max-w-full rounded-xl object-contain" onClick={(event) => event.stopPropagation()} />
+      {/* Flat category gallery viewer */}
+      {galleryLightboxIndex !== null && galleryViewerItems[galleryLightboxIndex] && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/95 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Xem ảnh trong gallery"
+          onClick={() => setGalleryLightboxIndex(null)}
+          onTouchStart={(event) => { galleryTouchStartX.current = event.changedTouches[0]?.clientX ?? null; }}
+          onTouchEnd={(event) => handleGallerySwipeEnd(event.changedTouches[0]?.clientX)}
+          onTouchCancel={() => { galleryTouchStartX.current = null; }}
+        >
+          <button type="button" aria-label="Đóng ảnh" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex(null); }} className="absolute right-4 top-4 rounded-full bg-zinc-800/80 p-3 text-white"><X className="h-5 w-5" /></button>
+          {galleryViewerItems.length > 1 && <>
+            <button type="button" aria-label="Ảnh trước" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex((galleryLightboxIndex - 1 + galleryViewerItems.length) % galleryViewerItems.length); }} className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronLeft className="h-6 w-6" /></button>
+            <button type="button" aria-label="Ảnh tiếp theo" onClick={(event) => { event.stopPropagation(); setGalleryLightboxIndex((galleryLightboxIndex + 1) % galleryViewerItems.length); }} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronRight className="h-6 w-6" /></button>
+            <span className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-semibold text-white">{galleryLightboxIndex + 1} / {galleryViewerItems.length}</span>
+          </>}
+          <img src={galleryViewerItems[galleryLightboxIndex].url} alt="Ảnh tham khảo trong danh mục" className="max-h-[82vh] max-w-full rounded-xl object-contain" onClick={(event) => event.stopPropagation()} />
+          {(galleryViewerItems[galleryLightboxIndex].cloudId || galleryViewerItems[galleryLightboxIndex].localPhoto) && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
+            <button type="button" onClick={(event) => { event.stopPropagation(); void deleteGalleryViewerItem(); }} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">
+              <Trash2 className="h-4 w-4" /> Xóa ảnh
+            </button>
+          )}
         </div>
       )}
       {activePoseModal && (

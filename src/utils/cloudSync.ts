@@ -145,14 +145,17 @@ export async function deletePhotoFromCloud(cloudId: string): Promise<boolean> {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token || ""}`,
+        Authorization: `Bearer ${token || (getCurrentUser()?.role === "admin" ? getCurrentUser()?.token : "") || ""}`,
       },
     });
-
+    if (!res.ok) {
+      const result = await res.json().catch(() => ({}));
+      throw new Error(typeof result.error === "string" ? result.error : `Không thể xóa ảnh trên Cloud Drive (${res.status}).`);
+    }
     return res.ok;
   } catch (err) {
     console.error("Cloud photo delete error:", err);
-    return false;
+    throw err instanceof Error ? err : new Error("Không thể xóa ảnh trên Cloud Drive.");
   }
 }
 
