@@ -1,16 +1,13 @@
 import React from "react";
 import { Camera, ScanSearch } from "lucide-react";
 import { OfflineImage } from "./OfflineImage";
+import { googleLensSearchUrl } from "../utils/googleLens";
 
 interface GalleryImageCardProps {
   imageUrl?: string;
   label: string;
   onOpen: () => void;
   similarImageUrl?: string;
-}
-
-function googleLensUrl(imageUrl: string): string {
-  return `https://lens.google.com/uploadbyurl?url=${encodeURIComponent(imageUrl)}`;
 }
 
 export const GalleryImageCard: React.FC<GalleryImageCardProps> = ({ imageUrl, label, onOpen, similarImageUrl }) => (
@@ -20,7 +17,7 @@ export const GalleryImageCard: React.FC<GalleryImageCardProps> = ({ imageUrl, la
     </button>
     {similarImageUrl && (
       <a
-        href={googleLensUrl(similarImageUrl)}
+        href={googleLensSearchUrl(similarImageUrl)}
         target="_blank"
         rel="noopener noreferrer"
         onClick={(event) => event.stopPropagation()}

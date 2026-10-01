@@ -12,6 +12,7 @@ import {
   Flame,
   ChevronLeft,
   ChevronRight,
+  ScanSearch,
   Trash2,
   X,
   Pencil,
@@ -50,12 +51,13 @@ import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purge
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { isCurrentUserAdmin } from "./utils/userAuth";
 import { isAdminAuthenticated } from "./utils/adminAuth";
-import { AnimatePresence, motion, type Variants } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
 import { categoryGalleryKey, UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_LABEL } from "./utils/categoryGallery";
 import { serverUrl } from "./services/apiUrl";
 import { SectionCoverActionsMenu } from "./components/SectionCoverActionsMenu";
+import { googleLensSearchUrl } from "./utils/googleLens";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -641,23 +643,40 @@ export default function App() {
   })), [flatGalleryPhotos]);
   useEffect(() => () => galleryPhotoUrls.forEach(({ url }) => URL.revokeObjectURL(url)), [galleryPhotoUrls]);
   const galleryViewerItems = useMemo(() => {
+    const seenItems = new Set<string>();
     const items = displayedGalleryImages.map((image) => {
       const localPhotoEntry = image.photoId
         ? galleryPhotoUrls.find(({ photo }) => photo.cloudId === image.photoId)
         : undefined;
+      const key = image.photoId ? `photo:${image.photoId}` : `image:${image.id}`;
+      if (seenItems.has(key)) return null;
+      seenItems.add(key);
+      const similarImageUrl = image.photoId
+        ? serverUrl(`/api/cloud/photo/${encodeURIComponent(image.photoId)}/image`)
+        : undefined;
       return {
-        key: image.id,
+        key,
         url: localPhotoEntry?.url || image.imageUrl || (image.photoId
           ? serverUrl(`/api/cloud/photo/${encodeURIComponent(image.photoId)}/image`)
           : ""),
+        similarImageUrl,
         cloudId: image.photoId,
         localPhoto: localPhotoEntry?.photo,
         canDelete: Boolean(image.photoId || localPhotoEntry),
       };
-    }).filter((item) => Boolean(item.url));
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item?.url));
     for (const { photo, url } of galleryPhotoUrls) {
-      if (!photo.cloudId || !(currentCategory?.images || []).some((image) => image.photoId === photo.cloudId)) {
-        items.push({ key: `local-${photo.id}`, url, cloudId: photo.cloudId, localPhoto: photo, canDelete: true });
+      const key = photo.cloudId ? `photo:${photo.cloudId}` : `local:${photo.id}`;
+      if (!seenItems.has(key)) {
+        seenItems.add(key);
+        items.push({
+          key,
+          url,
+          similarImageUrl: photo.cloudId ? serverUrl(`/api/cloud/photo/${encodeURIComponent(photo.cloudId)}/image`) : undefined,
+          cloudId: photo.cloudId,
+          localPhoto: photo,
+          canDelete: true,
+        });
       }
     }
     return items;
@@ -1585,7 +1604,7 @@ export default function App() {
                     imageUrl={item.url}
                     label={currentCategory.label}
                     onOpen={() => setGalleryLightboxIndex(index)}
-                    similarImageUrl={item.cloudId ? serverUrl(`/api/cloud/photo/${encodeURIComponent(item.cloudId)}/image`) : undefined}
+                    similarImageUrl={item.similarImageUrl}
                   />
                 ))}
                 <button type="button" onClick={openCategoryGallery} className="flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-zinc-300 bg-white/60 text-xs font-bold text-zinc-500 hover:border-amber-500 hover:text-amber-600 dark:border-zinc-700 dark:bg-zinc-900/60">
@@ -1663,19 +1682,29 @@ export default function App() {
             <button type="button" aria-label="Ảnh tiếp theo" onClick={(event) => { event.stopPropagation(); moveGallery(1); }} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-zinc-800/80 p-3 text-white hover:bg-zinc-700"><ChevronRight className="h-6 w-6" /></button>
             <span className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-semibold text-white">{galleryLightboxIndex + 1} / {galleryViewerItems.length}</span>
           </>}
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.img
-              key={galleryViewerItems[galleryLightboxIndex].key}
-              src={galleryViewerItems[galleryLightboxIndex].url}
-              alt="Ảnh tham khảo trong danh mục"
-              initial={{ opacity: 0, x: gallerySlideDirection * 36, scale: 0.985 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: gallerySlideDirection * -24, scale: 0.99 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-              className="max-h-[82vh] max-w-full rounded-xl object-contain"
+          <motion.img
+            key={galleryViewerItems[galleryLightboxIndex].key}
+            src={galleryViewerItems[galleryLightboxIndex].url}
+            alt="Ảnh tham khảo trong danh mục"
+            initial={{ opacity: 0, x: gallerySlideDirection * 36, scale: 0.985 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="max-h-[82vh] max-w-full rounded-xl object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+          {galleryViewerItems[galleryLightboxIndex].similarImageUrl && (
+            <a
+              href={googleLensSearchUrl(galleryViewerItems[galleryLightboxIndex].similarImageUrl)}
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={(event) => event.stopPropagation()}
-            />
-          </AnimatePresence>
+              title="Tìm ảnh tương tự trên toàn web bằng Google Lens (không tìm riêng trên Pinterest/RedNote)"
+              aria-label="Tìm ảnh tương tự trên toàn web bằng Google Lens"
+              className="absolute bottom-5 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/50 bg-black/70 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur hover:bg-black/85"
+            >
+              <ScanSearch className="h-4 w-4" />Tìm ảnh tương tự
+            </a>
+          )}
           {galleryViewerItems[galleryLightboxIndex].canDelete && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
             <button type="button" onClick={(event) => { event.stopPropagation(); void deleteGalleryViewerItem(); }} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">
               <Trash2 className="h-4 w-4" /> Xóa ảnh
