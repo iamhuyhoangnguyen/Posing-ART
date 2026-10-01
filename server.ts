@@ -14,6 +14,7 @@ import { withGeminiUnavailableRetry } from "./src/services/geminiRetry";
 import { APP_RELEASE_DATE, APP_VERSION, CURRENT_RELEASE_NOTES } from "./src/version";
 import { INITIAL_DATA_CANHAN, INITIAL_DATA_KYYEU } from "./src/data/posesData";
 import { appendGalleryPhotoReferences, categoryGalleryKey, createLegacyPoseKeyMap, remapLegacyGalleryPhotos, UNCATEGORIZED_CATEGORY_ID } from "./src/utils/categoryGallery";
+import { stripSeedGalleryPhotosFromCloudCategories } from "./src/utils/seedGalleryPhotos";
 
 dotenv.config();
 
@@ -727,6 +728,11 @@ async function initializeMongoStore(): Promise<CloudDriveData> {
       normalized.galleryV300BackupReference = backupReference || "local-development";
       console.info(`[V3 Gallery Migration] Remapped ${photoMigration.remappedCount} cloud photos; assigned ${photoMigration.fallbackCount} unknown photos to the visible Uncategorized gallery; retained all custom_poses records.`);
     }
+  }
+  const seedGalleryCleanup = stripSeedGalleryPhotosFromCloudCategories(normalized.customCategories);
+  normalized.customCategories = seedGalleryCleanup.categories as CloudDriveData["customCategories"];
+  if (seedGalleryCleanup.removedCount > 0) {
+    console.info(`[Gallery Seed Cleanup] Removed ${seedGalleryCleanup.removedCount} built-in pose photos from category galleries.`);
   }
   normalized.legacyMigrationComplete = true;
   await persistMongoStore(normalized);

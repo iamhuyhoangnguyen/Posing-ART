@@ -5,12 +5,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-nu",
     label: "Đơn Nữ",
-    coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80",
     description: "Các tư thế tôn vinh nét duyên dáng, nữ tính và thanh xuân rực rỡ",
     poses: [
       {
         id: "kyyeu-0-0",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Đứng thẳng nhìn máy",
         desc: "Tay tự nhiên hoặc chạm nhẹ tóc, vai mở nhẹ góc 15 độ",
         tips: ["Dồn trọng tâm vào chân sau", "Mắt nhìn thẳng ống kính mỉm cười nhẹ", "Thả lỏng ngón tay mềm mại"],
@@ -18,7 +16,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-1",
-        coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
         title: "Chống hông nhẹ",
         desc: "Dồn 1 chân, vai xoay chéo 45 độ tạo đường cong chữ S",
         tips: ["Đặt 4 ngón tay phía sau, ngón cái phía trước eo", "Hạ vai phía ống kính thấp hơn 1 chút"],
@@ -26,7 +23,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-2",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Ngồi bậc thềm",
         desc: "Tay chống cằm hoặc đặt nhẹ lên gối, chân vắt chéo nhẹ",
         tips: ["Ngồi 1/3 mép bậc thềm, không ngồi hết đùi", "Lưng thẳng, ngực hơi ưỡn nhẹ"],
@@ -34,7 +30,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-3",
-        coverImage: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=crop&w=600&q=80",
         title: "Vuốt tóc, nhìn xa",
         desc: "Bắt khoảnh khắc tự nhiên, gió nhẹ thổi bay tóc",
         tips: ["Ngón tay lướt nhẹ qua lọn tóc", "Mắt nhìn về khoảng không vô định lãng mạn"],
@@ -42,7 +37,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-4",
-        coverImage: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80",
         title: "Bước đi tự nhiên",
         desc: "Bước đi chậm rãi không nhìn máy, váy bay nhẹ",
         tips: ["Thợ ảnh bấm chế độ liên tục (Burst mode)", "Bước chân tự tin, không cúi gằm mặt"],
@@ -50,7 +44,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-5",
-        coverImage: "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?auto=format&fit=crop&w=600&q=80",
         title: "Ngoảnh lại qua vai",
         desc: "Người bước tới trước, ngoảnh đầu lại nhìn máy ảnh",
         tips: ["Tạo đường cong lưng quyến rũ", "Hạ cằm nhẹ để xương quai hàm sắc nét"],
@@ -58,7 +51,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-6",
-        coverImage: "https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?auto=format&fit=crop&w=600&q=80",
         title: "Nghiêng đầu mỉm cười",
         desc: "Đầu nghiêng nhẹ 15 độ, nụ cười rạng rỡ thanh xuân",
         tips: ["Mắt hơi híp nhẹ tạo vẻ hồn nhiên", "Chụp với hoa hoặc đạo cụ sách vở"],
@@ -66,7 +58,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-0-7",
-        coverImage: "https://images.unsplash.com/photo-1516726817505-f5ed825624d8?auto=format&fit=crop&w=600&q=80",
         title: "Che mặt e ấp",
         desc: "Dùng hoa, sách hoặc nón lá che nửa khuôn mặt tạo sự tò mò",
         tips: ["Để lộ đôi mắt biết cười", "Lấy nét chính xác vào con ngươi"],
@@ -77,12 +68,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-doi",
     label: "Đôi Bạn Thân (Besties)",
-    coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=800&q=80",
     description: "Khoảnh khắc ngọt ngào, tinh nghịch và gắn bó của đôi bạn thân nữ thanh xuân",
     poses: [
       {
         id: "kyyeu-2-0",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Tựa đầu vào vai nhau",
         desc: "Hai bạn nữ tựa đầu vào nhau, cùng nhìn ống kính mỉm cười rạng rỡ",
         tips: ["Tạo cảm giác thân thiết, ấm áp", "Có thể cầm chung bó hoa hoặc sách"],
@@ -90,7 +79,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-2-1",
-        coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
         title: "Khoác tay dạo bước",
         desc: "Hai bạn nữ khoác tay nhau bước đi trên sân trường hoặc hành lang",
         tips: ["Bước chân đồng nhịp tự nhiên", "Cười nói rạng rỡ bắt trọn khoảnh khắc candid"],
@@ -98,7 +86,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-2-2",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Thì thầm bí mật",
         desc: "Một bạn che tay thì thầm vào tai bạn kia khiến bạn kia bật cười khúc khích",
         tips: ["Bắt trọn nét tinh nghịch đáng yêu", "Tay che khum tròn tự nhiên mềm mại"],
@@ -106,7 +93,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-2-3",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Chụm đầu ghép hình trái tim",
         desc: "Hai bạn chụm đầu sát nhau, hai bàn tay ghép thành biểu tượng trái tim",
         tips: ["Tập trung lấy nét vào đôi mắt và nụ cười", "Biểu cảm tươi tắn đáng yêu"],
@@ -114,7 +100,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-2-4",
-        coverImage: "https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?auto=format&fit=crop&w=600&q=80",
         title: "Che chung chiếc ô trong suốt",
         desc: "Hai bạn cùng che chung chiếc ô trong suốt hoặc ô vintage thơ mộng",
         tips: ["Tạo ánh sáng viền lung linh qua tán ô", "Cả hai cùng ngước nhìn những hạt mưa rơi"],
@@ -122,7 +107,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-2-5",
-        coverImage: "https://images.unsplash.com/photo-1515934751635-c81c6bc9a2d8?auto=format&fit=crop&w=600&q=80",
         title: "Chụp ảnh selfie / Chụp cho nhau",
         desc: "Một bạn cầm máy ảnh/điện thoại giả vờ chụp cho bạn kia tạo tương tác",
         tips: ["Khoảnh khắc tự nhiên không gượng gạo", "Bối cảnh ghế đá hoặc hành lang lớp học"],
@@ -133,12 +117,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-nhom",
     label: "Tập Thể & Nhóm Nữ",
-    coverImage: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=800&q=80",
     description: "Ghi dấu tình bạn thanh xuân gắn bó, sự đồng lòng và năng lượng rực rỡ",
     poses: [
       {
         id: "kyyeu-3-0",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Tung mũ cử nhân / áo lớp",
         desc: "Cả nhóm đồng loạt tung mũ lên trời hò reo",
         tips: ["Đếm 1-2-3 để tung đồng thời", "Tốc độ màn trập tối thiểu 1/1000s để bắt dính"],
@@ -146,7 +128,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-3-1",
-        coverImage: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=600&q=80",
         title: "Xếp hàng so le bậc thang",
         desc: "Tận dụng bậc thềm giảng đường, đứng so le cao thấp",
         tips: ["Tránh để người phía trước che mặt người phía sau", "Mỗi người một dáng tay tự nhiên"],
@@ -154,7 +135,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-3-2",
-        coverImage: "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=600&q=80",
         title: "Nhảy tự do trên bãi cỏ",
         desc: "Tất cả cùng nhảy bật lên không trung với biểu cảm phấn khích",
         tips: ["Co gối khi nhảy để tạo cảm giác nhảy cao hơn", "Thợ ảnh nằm sát đất bấm máy"],
@@ -162,7 +142,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-3-3",
-        coverImage: "https://images.unsplash.com/photo-1543269865-cbf427effbad?auto=format&fit=crop&w=600&q=80",
         title: "Chụm đầu nhìn từ trên cao",
         desc: "Cả nhóm nằm hoặc quây tròn chụm đầu, thợ ảnh chụp thẳng từ trên xuống",
         tips: ["Gương mặt hướng về tâm vòng tròn", "Cười tươi nhìn vào ống kính"],
@@ -170,7 +149,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-3-4",
-        coverImage: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=600&q=80",
         title: "Xếp hình chữ hoặc trái tim",
         desc: "Tập thể đứng xếp thành chữ tên lớp hoặc biểu tượng trái tim",
         tips: ["Cần flycam hoặc thợ đứng từ tầng 2-3 chụp xuống", "Phân bố khoảng cách đều đặn"],
@@ -181,12 +159,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-aodai",
     label: "Áo Dài Truyền Thống",
-    coverImage: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=800&q=80",
     description: "Tà áo dài trắng thướt tha, tôn vinh nét đẹp dịu dàng thiếu nữ Việt Nam",
     poses: [
       {
         id: "kyyeu-4-0",
-        coverImage: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&q=80",
         title: "Nâng nhẹ tà áo dài",
         desc: "Một tay giữ nhẹ mép tà áo sau, bước đi chậm rãi",
         tips: ["Ngón tay khẽ nâng, không túm chặt tà áo", "Lưng thẳng, mắt nhìn chếch 30 độ"],
@@ -194,7 +170,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-4-1",
-        coverImage: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=600&q=80",
         title: "Ôm bó hoa sen / phượng vĩ",
         desc: "Hai tay ôm hoa trước ngực, nụ cười hiền dịu",
         tips: ["Hạ bó hoa xuống dưới ngực để không che cổ áo dài", "Cổ hơi vươn cao thon thả"],
@@ -202,7 +177,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-4-2",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Tựa cột hành lang cổ kính",
         desc: "Đứng nép bên hàng cột hành lang rêu phong cổ điển",
         tips: ["Tận dụng hàng cột làm đường dẫn thị giác hút về mẫu", "Ánh sáng cửa sổ chiếu nghiêng"],
@@ -210,7 +184,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-4-3",
-        coverImage: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=600&q=80",
         title: "Ngồi ghế đá đọc sách",
         desc: "Ngồi nghiêng trên ghế đá dưới gốc cây phượng, tay lật trang sách",
         tips: ["Tà áo trải dài mềm mại trên mặt ghế", "Đầu cúi nhẹ góc thanh thoát"],
@@ -218,7 +191,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-4-4",
-        coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
         title: "Che nón lá e ấp",
         desc: "Dùng nón lá che nghiêng ánh nắng, tạo bóng đổ nghệ thuật",
         tips: ["Để lộ 2/3 khuôn mặt với ánh mắt có hồn", "Nón lá hơi nghiêng duyên dáng"],
@@ -229,12 +201,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-cunhan",
     label: "Áo Cử Nhân Tốt Nghiệp",
-    coverImage: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=800&q=80",
     description: "Bộ lễ phục cử nhân trang trọng, tự hào khoảnh khắc nhận bằng tốt nghiệp",
     poses: [
       {
         id: "kyyeu-5-0",
-        coverImage: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=600&q=80",
         title: "Cầm bằng tốt nghiệp trước ngực",
         desc: "Hai tay nâng cuộn bằng đỏ hoặc bìa bằng trang trọng",
         tips: ["Mở rộng lồng ngực tự hào", "Dải tua rua mũ cử nhân đặt phía bên trái"],
@@ -242,7 +212,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-5-1",
-        coverImage: "https://images.unsplash.com/photo-1627556704290-2b1f5853ff78?auto=format&fit=crop&w=600&q=80",
         title: "Nâng mũ cử nhân nhìn lên",
         desc: "Một tay chạm mép mũ cử nhân nhìn hướng lên bầu trời tương lai",
         tips: ["Góc nghiêng thần thái hy vọng", "Ánh sáng chiếu vào mắt tạo đốm sáng catchlight"],
@@ -250,7 +219,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-5-2",
-        coverImage: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=600&q=80",
         title: "Chụp cùng cha mẹ & người thân",
         desc: "Khoác áo cử nhân cho cha mẹ hoặc ôm cha mẹ với bó hoa chúc mừng",
         tips: ["Ghi lại cảm xúc rưng rưng tự hào của phụ huynh", "Ảnh kỷ niệm quý giá nhất"],
@@ -258,7 +226,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-5-3",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Ném mũ cử nhân solo",
         desc: "Cử nhân tự tung chiếc mũ của mình lên cao trên nền trời xanh",
         tips: ["Canh góc trời trong mây trắng", "Chụp liên tục 10 tấm/giây để chọn ảnh đẹp nhất"],
@@ -269,12 +236,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-dongphuc",
     label: "Đồng Phục & Áo Lớp",
-    coverImage: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=800&q=80",
     description: "Năng động, tươi trẻ và mang đậm phong cách tuổi học trò ngây thơ",
     poses: [
       {
         id: "kyyeu-6-0",
-        coverImage: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=600&q=80",
         title: "Khoác vai đồng đội",
         desc: "Nhóm bạn nữ khoác vai nhau hướng về camera mỉm cười rạng rỡ",
         tips: ["Tạo đường cong hàng ngang tự nhiên", "Mỗi bạn một nụ cười rực rỡ"],
@@ -282,7 +247,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-6-1",
-        coverImage: "https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=600&q=80",
         title: "Ngồi bàn học quay lưng lại nhìn",
         desc: "Ngồi trong lớp học, quay đầu lại nhìn ra hành lang",
         tips: ["Tận dụng bảng đen, phấn trắng làm bối cảnh hoài niệm", "Ánh sáng tự nhiên từ cửa sổ"],
@@ -290,7 +254,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-6-2",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Đuổi bắt trên sân thể thao",
         desc: "Các bạn nữ chạy đùa nghịch trên sân bóng hoặc đường chạy",
         tips: ["Khoảnh khắc động 100% tự nhiên", "Không cần nhìn máy ảnh"],
@@ -301,12 +264,10 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
   {
     id: "kyyeu-hautruong",
     label: "Hậu Trường & Hài Hước",
-    coverImage: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
     description: "Những khoảnh khắc lầy lội, chân thực và đáng nhớ nhất phía sau ống kính",
     poses: [
       {
         id: "kyyeu-7-0",
-        coverImage: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80",
         title: "Thợ ảnh tác nghiệp lăn xả",
         desc: "Chụp lại cảnh thợ ảnh nằm bò, leo cây để bấm máy",
         tips: ["Ghi lại sự vất vả mà vui nhộn của ekip", "Góc chụp rộng toàn cảnh"],
@@ -314,7 +275,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-7-1",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Biểu cảm khó đỡ (Meme)",
         desc: "Cả nhóm cùng làm mặt xấu hoặc diễn lại các meme nổi tiếng trên mạng",
         tips: ["Tạo tiếng cười sảng khoái xua tan mệt mỏi của ca chụp", "Không cần giữ hình tượng"],
@@ -322,7 +282,6 @@ export const INITIAL_DATA_KYYEU: CategoryItem[] = [
       },
       {
         id: "kyyeu-7-2",
-        coverImage: "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=600&q=80",
         title: "Ăn vặt / dặm phấn nghỉ ngơi",
         desc: "Khoảnh khắc ngồi bệt chia nhau que kem, chỉnh lại tóc cho nhau",
         tips: ["Sự quan tâm chăm sóc chân thành giữa bạn bè", "Màu sắc ấm cúng tự nhiên"],
@@ -343,12 +302,10 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
   {
     id: "canhan-nangtho",
     label: "Nàng Thơ & Vintage",
-    coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80",
     description: "Phong cách trong trẻo, mộng mơ, ánh sáng vàng hoàng hôn ấm áp",
     poses: [
       {
         id: "canhan-0-0",
-        coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
         title: "Đón nắng ngược hoàng hôn",
         desc: "Đứng xoay lưng về phía mặt trời, ánh sáng tạo viền vàng rực rỡ quanh mái tóc",
         tips: ["Tránh nhìn thẳng mặt trời làm nheo mắt", "Tận dụng hiệu ứng bokeh lung linh"],
@@ -356,7 +313,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-0-1",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Nằm trên đồng cỏ hoa dại",
         desc: "Nằm thư thái trên thảm cỏ, hoa cài nhẹ lên tóc, mắt nhắm hờ",
         tips: ["Tạo cảm giác thả lỏng hòa mình vào thiên nhiên", "Chụp cận cảnh góc từ trên cao"],
@@ -364,7 +320,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-0-2",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Tựa cửa sổ kính mờ mưa rơi",
         desc: "Tựa đầu vào khung cửa sổ có vệt nước mưa, ánh mắt xa xăm",
         tips: ["Tạo chiều sâu điện ảnh (Cinematic mood)", "Lấy nét vào hạt mưa hoặc đôi mắt"],
@@ -372,7 +327,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-0-3",
-        coverImage: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=crop&w=600&q=80",
         title: "Xoay váy bồng bềnh",
         desc: "Xoay người nhẹ nhàng để tà váy xòe rộng như cánh hoa",
         tips: ["Bấm máy chế độ chụp liên tục tốc độ cao", "Nụ cười hồn nhiên tự do"],
@@ -383,12 +337,10 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
   {
     id: "canhan-camxuc",
     label: "Cảm Xúc & Moody",
-    coverImage: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80",
     description: "Tập trung vào chiều sâu ánh mắt, tâm trạng lắng đọng và điện ảnh",
     poses: [
       {
         id: "canhan-1-0",
-        coverImage: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80",
         title: "Ánh mắt biết nói (Extreme Close-up)",
         desc: "Khung hình cắt sát đôi mắt và sống mũi, truyền tải câu chuyện nội tâm",
         tips: ["Mắt nhìn sâu vào ống kính", "Kiểm soát bóng đổ trên sống mũi"],
@@ -396,7 +348,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-1-1",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Bóng đổ tương phản cao (Chiaroscuro)",
         desc: "Một nửa khuôn mặt chìm trong bóng tối, nửa kia đón nguồn sáng gắt",
         tips: ["Tạo sự bí ẩn và kịch tính", "Sử dụng nguồn sáng đơn độc như đèn rọi hoặc khe cửa"],
@@ -404,7 +355,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-1-2",
-        coverImage: "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?auto=format&fit=crop&w=600&q=80",
         title: "Ngồi thu mình suy tư",
         desc: "Ngồi ôm gối, cằm tỳ nhẹ lên cánh tay, nhìn vào khoảng không vô định",
         tips: ["Biểu cảm tĩnh lặng, không gượng ép", "Tone màu lạnh hoặc đen trắng cổ điển"],
@@ -415,12 +365,10 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
   {
     id: "canhan-dantoc",
     label: "Trang Phục Dân Tộc Tây Bắc",
-    coverImage: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80",
     description: "Họa tiết thổ cẩm rực rỡ giữa núi rừng hùng vĩ, ruộng bậc thang và mây mù",
     poses: [
       {
         id: "canhan-2-0",
-        coverImage: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=600&q=80",
         title: "Đứng trên mỏm đá ngắm biển mây",
         desc: "Đứng quay lưng hoặc nghiêng người nhìn ra thung lũng mây bồng bềnh",
         tips: ["Khăn đội đầu hoặc vạt áo thổ cẩm tung bay theo gió núi", "Lấy toàn cảnh thiên nhiên"],
@@ -428,7 +376,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-2-1",
-        coverImage: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&q=80",
         title: "Nâng gùi hoa cải / hoa mận",
         desc: "Đeo gùi hoa rực rỡ sau lưng, một tay chạm dây gùi mỉm cười",
         tips: ["Nụ cười rạng rỡ của sơn nữ vùng cao", "Màu sắc hoa tương phản với trang phục"],
@@ -436,7 +383,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-2-2",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Cầm ô thổ cẩm che nắng",
         desc: "Chiếc ô hoa văn thổ cẩm che nghiêng, mắt nhìn theo hướng ô",
         tips: ["Họa tiết ô làm khung phụ đóng khung khuôn mặt", "Ánh mắt trong veo"],
@@ -447,12 +393,10 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
   {
     id: "canhan-besties",
     label: "Đôi Bạn Thân & Lookbook Nữ",
-    coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=800&q=80",
     description: "Tình bạn diệu kỳ, tự nhiên và phong cách thời trang đôi nàng thơ",
     poses: [
       {
         id: "canhan-3-0",
-        coverImage: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80",
         title: "Cùng nghe chung một tai nghe",
         desc: "Hai bạn nữ ngồi cạnh nhau, mỗi người đeo 1 bên tai nghe nhạc",
         tips: ["Tạo sự kết nối tinh tế, hoài niệm", "Mắt nhắm nhẹ cảm nhận giai điệu"],
@@ -460,7 +404,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-3-1",
-        coverImage: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
         title: "Chạy đùa bên bờ biển / cánh đồng",
         desc: "Một bạn chạy trước kéo tay bạn kia chạy theo mỉm cười",
         tips: ["Bắt chuyển động dynamic sống động", "Gió biển thổi bay vạt áo"],
@@ -468,7 +411,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-3-2",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Cười đối diện trong quán cafe",
         desc: "Ngồi đối diện bàn cafe nhỏ, cùng cầm tách trà cười nói rạng rỡ",
         tips: ["Ánh sáng đèn vàng ấm áp của quán", "Góc cận lãng mạn"],
@@ -479,12 +421,10 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
   {
     id: "canhan-streetwear",
     label: "Streetwear & Retro 90s",
-    coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80",
     description: "Cá tính, phá cách, đường phố đô thị và màu phim hoài cổ",
     poses: [
       {
         id: "canhan-4-0",
-        coverImage: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
         title: "Ngồi bệt bên vỉa hè / cầu thang thoát hiểm",
         desc: "Dáng ngồi ngầu, chân duỗi chân co, mắt nhìn thẳng ống kính sắc lạnh",
         tips: ["Thần thái sắc sảo (Slay mood)", "Trang phục oversize phong cách"],
@@ -492,7 +432,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-4-1",
-        coverImage: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
         title: "Cầm máy ảnh film chụp lại thợ ảnh",
         desc: "Đưa máy ảnh film compact lên mắt giả vờ chụp lại ống kính",
         tips: ["Tạo tương tác hai chiều thú vị", "Đôi mắt nhắm một bên lấy nét"],
@@ -500,7 +439,6 @@ export const INITIAL_DATA_CANHAN: CategoryItem[] = [
       },
       {
         id: "canhan-4-2",
-        coverImage: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=crop&w=600&q=80",
         title: "Băng qua vạch kẻ đường",
         desc: "Sải bước tự tin qua vạch qua đường phong cách Abbey Road",
         tips: ["Chọn ngã tư vắng vẻ hoặc phố đi bộ", "Bước chân dứt khoát"],

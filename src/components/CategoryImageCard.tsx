@@ -1,5 +1,6 @@
 import React from "react";
 import type { CategoryItem } from "../types";
+import { Image as ImageIcon } from "lucide-react";
 import { OfflineImage } from "./OfflineImage";
 import { AdminItemActionsMenu } from "./AdminItemActionsMenu";
 
@@ -14,8 +15,6 @@ interface CategoryImageCardProps {
   onShare?: () => void;
   onDownload?: () => void;
 }
-
-const FALLBACK_COVER = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80";
 
 /** Shared image-backed category selector used by both Kỷ Yếu and Concept. */
 export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
@@ -40,13 +39,19 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
         : "border-zinc-200 dark:border-zinc-800 opacity-95 hover:opacity-100 hover:shadow-md"
     }`}
   >
-    <OfflineImage
-      src={category.coverImage || FALLBACK_COVER}
-      alt={category.label}
-      loading="lazy"
-      className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-      wrapperClassName="absolute inset-0"
-    />
+    {category.coverImage ? (
+      <OfflineImage
+        src={category.coverImage}
+        alt={category.label}
+        loading="lazy"
+        className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        wrapperClassName="absolute inset-0"
+      />
+    ) : (
+      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-zinc-200 to-zinc-300 dark:from-zinc-800 dark:to-zinc-950">
+        <ImageIcon className="h-9 w-9 text-zinc-400/70" />
+      </div>
+    )}
     <div
       className={`absolute inset-0 transition-colors ${
         isActive

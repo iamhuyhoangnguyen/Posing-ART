@@ -26,6 +26,9 @@ import {
   ListChecks,
   FileImage,
   ChevronDown,
+  Dices,
+  QrCode,
+  Maximize,
 } from "lucide-react";
 import { CategoryItem, FilterStatus, PhotoRecord, PoseItem, SectionType } from "./types";
 import { INITIAL_DATA_KYYEU, INITIAL_DATA_CANHAN } from "./data/posesData";
@@ -42,6 +45,7 @@ const EditCoverModal = lazy(() => import("./components/EditCoverModal").then((mo
 const InstallGuideModal = lazy(() => import("./components/InstallGuideModal").then((module) => ({ default: module.InstallGuideModal })));
 const PersonalModal = lazy(() => import("./components/PersonalModal").then((module) => ({ default: module.PersonalModal })));
 const CategoryDeleteConfirmModal = lazy(() => import("./components/CategoryDeleteConfirmModal").then((module) => ({ default: module.CategoryDeleteConfirmModal })));
+const CategoryShareQrModal = lazy(() => import("./components/CategoryShareQrModal").then((module) => ({ default: module.CategoryShareQrModal })));
 const HomeLibraryTools = lazy(() => import("./components/HomeLibraryTools").then((module) => ({ default: module.HomeLibraryTools })));
 import { InspirationBar } from "./components/InspirationBar";
 import { AddIdeaCard } from "./components/AddIdeaCard";
@@ -58,6 +62,7 @@ import { categoryGalleryKey, UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_L
 import { serverUrl } from "./services/apiUrl";
 import { SectionCoverActionsMenu } from "./components/SectionCoverActionsMenu";
 import { googleLensSearchUrl } from "./utils/googleLens";
+import { isSeedPhotoUrl, withoutSeedCategoryCover, withoutSeedGalleryPhotos } from "./utils/seedGalleryPhotos";
 
 type CoverSectionKey = "kyyeu" | "canhan";
 type CoverImageSyncData =
@@ -121,19 +126,17 @@ function applyCategoryRenames(categories: CategoryItem[], section: "kyyeu" | "ca
   return categories.map((category) => {
     const categoryRename = category.id === UNCATEGORIZED_CATEGORY_ID ? undefined :
       renames.find((item) => item.targetKind === "category" && item.section === section && item.categoryId === category.id);
-    return {
+    const cleanedCategory = withoutSeedCategoryCover({
       ...category,
       label: categoryRename?.label || category.label,
-      images: category.images?.length ? category.images : category.poses.filter((pose) => Boolean(pose.coverImage)).map((pose) => ({
-        id: `legacy:${pose.id}`,
-        imageUrl: pose.coverImage!,
-        sourcePoseId: pose.id,
-      })),
+      images: withoutSeedGalleryPhotos(category.images),
       poses: category.poses.filter((pose) => !deleted.has(pose.id)).map((pose) => {
+        const cleanedPose = isSeedPhotoUrl(pose.coverImage) ? { ...pose, coverImage: undefined } : pose;
         const poseRename = renames.find((item) => item.targetKind === "pose" && item.section === section && item.categoryId === category.id && item.poseId === pose.id);
-        return poseRename ? { ...pose, title: poseRename.label } : pose;
+        return poseRename ? { ...cleanedPose, title: poseRename.label } : cleanedPose;
       }),
-    };
+    });
+    return cleanedCategory;
   });
 }
 
@@ -238,6 +241,10 @@ export default function App() {
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState<number | null>(null);
   const [gallerySlideDirection, setGallerySlideDirection] = useState(1);
   const galleryTouchStartX = useRef<number | null>(null);
+  const [isCueCardOpen, setIsCueCardOpen] = useState(false);
+  const cueTouchStart = useRef<{ x: number; y: number } | null>(null);
+  const cueTouchMoved = useRef(false);
+  const deepLinkHandled = useRef(false);
 
   // Modals state
   const [activePoseModal, setActivePoseModal] = useState<{
@@ -258,6 +265,7 @@ export default function App() {
   const [categoryDeleteCandidate, setCategoryDeleteCandidate] = useState<CategoryDeleteCandidate | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [categoryDeleteError, setCategoryDeleteError] = useState("");
+  const [qrShareTarget, setQrShareTarget] = useState<{ section: "kyyeu" | "canhan"; categoryId: string; label: string } | null>(null);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
@@ -528,7 +536,7 @@ export default function App() {
       const galleries = (event as CustomEvent<{ galleries?: Array<{ section?: string; categoryId?: string; images?: CategoryItem["images"] }> }>).detail?.galleries || [];
       const update = (categories: CategoryItem[], section: "kyyeu" | "canhan") => categories.map((category) => {
         const gallery = galleries.find((item) => item.section === section && item.categoryId === category.id);
-        return gallery && Array.isArray(gallery.images) ? { ...category, images: gallery.images } : category;
+        return gallery && Array.isArray(gallery.images) ? { ...category, images: withoutSeedGalleryPhotos(gallery.images) } : category;
       });
       setKyyeuData((categories) => update(categories, "kyyeu"));
       setCanhanData((categories) => update(categories, "canhan"));
@@ -596,8 +604,34 @@ export default function App() {
   const currentCategories = currentSection === "kyyeu" ? kyyeuData : canhanData;
   const currentCatIdx = currentSection === "kyyeu" ? activeKyyeuCatIdx : activeCanhanCatIdx;
   const currentCategory = currentCategories[currentCatIdx] || currentCategories[0];
+  const currentCategoryIsPublic = Boolean(currentCategory &&
+    (currentSection === "kyyeu" ? INITIAL_DATA_KYYEU : currentSection === "canhan" ? INITIAL_DATA_CANHAN : []).some((category) => category.id === currentCategory.id));
   const currentCategoryMatchesSearch = !searchQuery.trim() || Boolean(currentCategory &&
     currentCategory.label.toLocaleLowerCase("vi-VN").includes(searchQuery.trim().toLocaleLowerCase("vi-VN")));
+
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get("section");
+    const categoryId = params.get("category");
+    if ((section !== "kyyeu" && section !== "canhan") || !categoryId) return;
+    const categories = section === "kyyeu" ? kyyeuData : canhanData;
+    const index = categories.findIndex((category) => category.id === categoryId);
+    if (index < 0) return;
+    deepLinkHandled.current = true;
+    setCurrentSection(section);
+    if (section === "kyyeu") setActiveKyyeuCatIdx(index);
+    else setActiveCanhanCatIdx(index);
+    setIsCategoryDetailOpen(true);
+    setSearchQuery("");
+  }, [kyyeuData, canhanData]);
+
+  const categoryShareUrl = (section: "kyyeu" | "canhan", categoryId: string) => {
+    const url = new URL(Capacitor.isNativePlatform() ? "https://posing-art-fn3f.vercel.app" : window.location.href);
+    url.searchParams.set("section", section);
+    url.searchParams.set("category", categoryId);
+    return url.toString();
+  };
 
   const openLibraryCategory = (section: "kyyeu" | "canhan", categoryIndex: number) => {
     setCurrentSection(section);
@@ -686,17 +720,28 @@ export default function App() {
     setGallerySlideDirection(direction);
     setGalleryLightboxIndex((index) => index === null ? null : (index + direction + galleryViewerItems.length) % galleryViewerItems.length);
   }, [galleryViewerItems.length]);
-  useEffect(() => setGalleryLightboxIndex(null), [galleryKey]);
+  const openRandomGalleryImage = () => {
+    if (!galleryViewerItems.length) return;
+    setGallerySlideDirection(1);
+    setGalleryLightboxIndex(Math.floor(Math.random() * galleryViewerItems.length));
+  };
+  useEffect(() => {
+    setGalleryLightboxIndex(null);
+    setIsCueCardOpen(false);
+  }, [galleryKey]);
   useEffect(() => {
     if (galleryLightboxIndex === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setGalleryLightboxIndex(null);
+      if (event.key === "Escape") {
+        if (isCueCardOpen) setIsCueCardOpen(false);
+        else setGalleryLightboxIndex(null);
+      }
       if (event.key === "ArrowLeft") moveGallery(-1);
       if (event.key === "ArrowRight") moveGallery(1);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [galleryLightboxIndex, galleryViewerItems.length, moveGallery]);
+  }, [galleryLightboxIndex, galleryViewerItems.length, moveGallery, isCueCardOpen]);
 
   const deleteGalleryViewerItem = async () => {
     const item = galleryLightboxIndex === null ? undefined : galleryViewerItems[galleryLightboxIndex];
@@ -727,6 +772,19 @@ export default function App() {
     galleryTouchStartX.current = null;
     if (galleryLightboxIndex === null || startX === null || endX === undefined || Math.abs(endX - startX) < 45 || galleryViewerItems.length < 2) return;
     moveGallery(endX < startX ? 1 : -1);
+  };
+
+  const handleCueCardTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    const start = cueTouchStart.current;
+    cueTouchStart.current = null;
+    if (!start) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaX) > 30 || Math.abs(deltaY) > 30) cueTouchMoved.current = true;
+    if (deltaY > 75) setIsCueCardOpen(false);
+    else if (Math.abs(deltaX) > 55) moveGallery(deltaX < 0 ? 1 : -1);
   };
 
   const openCategoryGallery = () => {
@@ -1530,35 +1588,48 @@ export default function App() {
             ) : null}
 
             {(currentSection === "canhan" || currentSection === "kyyeu") && isCategoryDetailOpen && currentCategory && (
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setIsCategoryDetailOpen(false);
                     setSearchQuery("");
                   }}
-                  className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-200"
+                  className="min-h-10 shrink-0 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
                 >
                   ← {currentSection === "kyyeu" ? "Danh mục" : "Chủ đề"}
                 </button>
                 <h2 className="min-w-0 truncate text-base font-black text-zinc-900 dark:text-zinc-100">
                   {currentCategory.label}
                 </h2>
+                <div className="ml-auto flex shrink-0 gap-2">
+                  {galleryViewerItems.length > 0 && (
+                    <button type="button" onClick={openRandomGalleryImage} title="Quay ảnh ngẫu nhiên trong danh mục" className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-2.5 text-xs font-bold text-white hover:bg-violet-500 sm:px-3">
+                      <Dices className="h-4 w-4" /><span className="hidden sm:inline">Quay ảnh</span><span className="sm:hidden">Quay</span>
+                    </button>
+                  )}
+                  {currentCategoryIsPublic && (
+                    <button type="button" onClick={() => setQrShareTarget({ section: currentSection, categoryId: currentCategory.id, label: currentCategory.label })} title="Tạo mã QR chia sẻ danh mục công khai" className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-bold text-zinc-700 hover:border-amber-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 sm:px-3">
+                      <QrCode className="h-4 w-4" /><span className="hidden sm:inline">Mã QR</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
             {/* Category Banner with Photo Cover & Pencil Edit Button */}
             {currentSection === "kyyeu" && isCategoryDetailOpen && currentCategory && !searchQuery && (
               <div className="relative rounded-3xl overflow-hidden h-36 sm:h-44 border border-zinc-200 dark:border-zinc-800 shadow-sm group">
-                <OfflineImage
-                  src={
-                    currentCategory.coverImage ||
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80"
-                  }
-                  alt={currentCategory.label}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                  wrapperClassName="absolute inset-0"
-                />
+                {currentCategory.coverImage ? (
+                  <OfflineImage
+                    src={currentCategory.coverImage}
+                    alt={currentCategory.label}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                    wrapperClassName="absolute inset-0"
+                  />
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-zinc-300 via-zinc-400 to-zinc-600 dark:from-zinc-800 dark:via-zinc-900 dark:to-black" />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
 
                 {/* EDIT CATEGORY COVER PENCIL BUTTON */}
@@ -1595,8 +1666,8 @@ export default function App() {
               </div>
             )}
 
-            {/* Grid of Poses with Realistic Photo Covers & Pencil Buttons */}
-            {isCategoryDetailOpen && (displayedGalleryImages.length > 0 || currentCategoryMatchesSearch && galleryPhotoUrls.length > 0 || !searchQuery.trim()) ? (
+            {/* Flat category photo gallery */}
+            {isCategoryDetailOpen && galleryViewerItems.length > 0 ? (
       <div className="grid grid-cols-2 gap-3 pt-1">
                 {galleryViewerItems.map((item, index) => (
                   <GalleryImageCard
@@ -1614,22 +1685,26 @@ export default function App() {
             ) : isCategoryDetailOpen ? (
               <div className="space-y-3">
                 <div className="text-center py-14 px-4 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 space-y-2">
-                  <Search className="w-8 h-8 text-zinc-400 mx-auto" />
+                  {currentCategoryMatchesSearch ? <ImageIcon className="w-8 h-8 text-zinc-400 mx-auto" /> : <Search className="w-8 h-8 text-zinc-400 mx-auto" />}
                   <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                    Không tìm thấy chủ đề phù hợp
+                    {currentCategoryMatchesSearch ? "Danh mục đang trống" : "Không tìm thấy chủ đề phù hợp"}
                   </h3>
                   <p className="text-xs text-zinc-500 max-w-xs mx-auto">
-                    Hãy thử tìm tên chủ đề hoặc danh mục khác.
+                    {currentCategoryMatchesSearch ? "Hãy thêm ảnh để bắt đầu bộ sưu tập này." : "Hãy thử tìm tên chủ đề hoặc danh mục khác."}
                   </p>
-                  <button
-                    onClick={() => {
-                      setSearchQuery("");
-                      setFilterStatus("all");
-                    }}
-                    className="mt-2 text-xs font-bold text-amber-600 dark:text-amber-400 underline"
-                  >
-                    Xóa bộ lọc tìm kiếm
-                  </button>
+                  {currentCategoryMatchesSearch ? (
+                    <button type="button" onClick={openCategoryGallery} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-amber-500 px-4 text-xs font-bold text-zinc-950 hover:bg-amber-400"><Plus className="h-4 w-4" />Thêm ảnh vào danh mục</button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setSearchQuery("");
+                        setFilterStatus("all");
+                      }}
+                      className="mt-2 text-xs font-bold text-amber-600 dark:text-amber-400 underline"
+                    >
+                      Xóa bộ lọc tìm kiếm
+                    </button>
+                  )}
                 </div>
 
               </div>
@@ -1689,28 +1764,75 @@ export default function App() {
             initial={{ opacity: 0, x: gallerySlideDirection * 36, scale: 0.985 }}
             animate={{ opacity: 1, x: 0, scale: 1 }}
             transition={{ duration: 0.22, ease: "easeOut" }}
-            className="max-h-[82vh] max-w-full rounded-xl object-contain"
+            className="max-h-[calc(100dvh-7rem)] max-w-full rounded-xl object-contain"
             onClick={(event) => event.stopPropagation()}
           />
-          {galleryViewerItems[galleryLightboxIndex].similarImageUrl && (
-            <a
-              href={googleLensSearchUrl(galleryViewerItems[galleryLightboxIndex].similarImageUrl)}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(event) => event.stopPropagation()}
-              title="Tìm ảnh tương tự trên toàn web bằng Google Lens (không tìm riêng trên Pinterest/RedNote)"
-              aria-label="Tìm ảnh tương tự trên toàn web bằng Google Lens"
-              className="absolute bottom-5 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/50 bg-black/70 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur hover:bg-black/85"
-            >
-              <ScanSearch className="h-4 w-4" />Tìm ảnh tương tự
-            </a>
-          )}
-          {galleryViewerItems[galleryLightboxIndex].canDelete && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
-            <button type="button" onClick={(event) => { event.stopPropagation(); void deleteGalleryViewerItem(); }} className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-500">
-              <Trash2 className="h-4 w-4" /> Xóa ảnh
-            </button>
-          )}
+          <div className="absolute inset-x-3 z-20 flex justify-center sm:inset-x-6" style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }} onClick={(event) => event.stopPropagation()}>
+            <div className="flex w-full max-w-xl items-center justify-center gap-2 rounded-2xl border border-white/15 bg-black/75 p-2 shadow-xl backdrop-blur-md">
+              {galleryViewerItems[galleryLightboxIndex].similarImageUrl && (
+                <a
+                  href={googleLensSearchUrl(galleryViewerItems[galleryLightboxIndex].similarImageUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Tìm ảnh tương tự trên toàn web bằng Google Lens (không tìm riêng trên Pinterest/RedNote)"
+                  aria-label="Tìm ảnh tương tự trên toàn web bằng Google Lens"
+                  className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/20 px-2 text-[11px] font-bold text-white hover:bg-white/10 sm:gap-2 sm:px-3 sm:text-xs"
+                >
+                  <ScanSearch className="h-4 w-4 shrink-0" /><span className="truncate">Tìm tương tự</span>
+                </a>
+              )}
+              <button type="button" onClick={() => setIsCueCardOpen(true)} className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/20 px-2 text-[11px] font-bold text-white hover:bg-white/10 sm:gap-2 sm:px-3 sm:text-xs">
+                <Maximize className="h-4 w-4 shrink-0" /><span className="truncate">Cue card</span>
+              </button>
+              {galleryViewerItems[galleryLightboxIndex].canDelete && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
+                <button type="button" onClick={() => void deleteGalleryViewerItem()} className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-2 text-[11px] font-bold text-white hover:bg-rose-500 sm:gap-2 sm:px-3 sm:text-xs">
+                  <Trash2 className="h-4 w-4 shrink-0" /><span className="truncate">Xóa ảnh</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
+      )}
+      {isCueCardOpen && galleryLightboxIndex !== null && galleryViewerItems[galleryLightboxIndex] && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-black"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Chế độ Cue card toàn màn hình. Chạm nửa trái/phải để chuyển ảnh."
+          onClick={(event) => {
+            if (cueTouchMoved.current) { cueTouchMoved.current = false; return; }
+            if ((event.target as HTMLElement).closest("button")) return;
+            moveGallery(event.clientX < window.innerWidth / 2 ? -1 : 1);
+          }}
+          onTouchStart={(event) => {
+            const touch = event.changedTouches[0];
+            cueTouchMoved.current = false;
+            cueTouchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+          }}
+          onTouchEnd={handleCueCardTouchEnd}
+          onTouchCancel={() => { cueTouchStart.current = null; cueTouchMoved.current = false; }}
+        >
+          <motion.img
+            key={`cue-${galleryViewerItems[galleryLightboxIndex].key}`}
+            src={galleryViewerItems[galleryLightboxIndex].url}
+            alt="Cue card ảnh tham khảo"
+            initial={{ opacity: 0.65 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.18 }}
+            className="pointer-events-none h-[100dvh] w-screen select-none object-contain"
+            draggable={false}
+          />
+          <button type="button" aria-label="Thoát chế độ Cue card" title="Thoát Cue card" onClick={(event) => { event.stopPropagation(); setIsCueCardOpen(false); }} className="absolute right-4 top-4 z-10 flex min-h-12 min-w-12 items-center justify-center rounded-full border border-white/30 bg-black/65 text-white shadow-lg backdrop-blur hover:bg-black/85">
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+      )}
+      {qrShareTarget && (
+        <CategoryShareQrModal
+          categoryLabel={qrShareTarget.label}
+          shareUrl={categoryShareUrl(qrShareTarget.section, qrShareTarget.categoryId)}
+          onClose={() => setQrShareTarget(null)}
+        />
       )}
       {activePoseModal && (
         <PoseModal
