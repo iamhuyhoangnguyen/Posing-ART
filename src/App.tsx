@@ -23,6 +23,7 @@ import {
   Send,
   User,
   WifiOff,
+  CloudUpload,
   ListChecks,
   FileImage,
   ChevronDown,
@@ -52,7 +53,7 @@ import { AddIdeaCard } from "./components/AddIdeaCard";
 const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSection").then((module) => ({ default: module.AIIdeaAssistantSection })));
 import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
-import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
+import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, republishLibraryCategories, type CategoryDeletionPreview } from "./services/categoryAdminService";
 import { verifyAdminSession } from "./utils/adminAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
@@ -268,6 +269,7 @@ export default function App() {
   const [qrShareTarget, setQrShareTarget] = useState<{ label: string; shareUrl: string } | null>(null);
   const [isCreatingQr, setIsCreatingQr] = useState(false);
   const [isAdminSessionVerified, setIsAdminSessionVerified] = useState(false);
+  const [isRepublishingCategories, setIsRepublishingCategories] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
@@ -587,6 +589,22 @@ export default function App() {
       setKyyeuData((categories) => update(categories, "kyyeu"));
       setCanhanData((categories) => update(categories, "canhan"));
     };
+    const mergeSyncedUserCategories = (event: Event) => {
+      const entries = (event as CustomEvent<{ categories?: Array<{ section?: string; category?: CategoryItem }> }>).detail?.categories || [];
+      const merge = (categories: CategoryItem[], section: "kyyeu" | "canhan") => {
+        const next = [...categories];
+        for (const entry of entries) {
+          const category = entry.category;
+          if (entry.section !== section || !category || typeof category.id !== "string" || typeof category.label !== "string") continue;
+          const index = next.findIndex((item) => item.id === category.id);
+          if (index >= 0) next[index] = { ...category, images: category.images || next[index].images || [], poses: category.poses || next[index].poses || [] };
+          else next.push({ ...category, images: category.images || [], poses: category.poses || [] });
+        }
+        return next;
+      };
+      setKyyeuData((categories) => merge(categories, "kyyeu"));
+      setCanhanData((categories) => merge(categories, "canhan"));
+    };
     const removeDeletedCategories = () => {
       const deleted = getDeletedCategoryKeys();
       setKyyeuData((categories) => ensureUncategorizedCategory("kyyeu", categories.filter((category) => category.id === UNCATEGORIZED_CATEGORY_ID || !deleted.has(`kyyeu:${category.id}`))));
@@ -614,11 +632,13 @@ export default function App() {
     };
     window.addEventListener("cloud_records_synced", refreshSyncedProgress);
     window.addEventListener("cloud_category_galleries_synced", mergeCategoryGalleries);
+    window.addEventListener("cloud_user_categories_synced", mergeSyncedUserCategories);
     window.addEventListener("cloud_categories_synced", removeDeletedCategories);
     window.addEventListener("cloud_poses_synced", removeDeletedPoses);
     return () => {
       window.removeEventListener("cloud_records_synced", refreshSyncedProgress);
       window.removeEventListener("cloud_category_galleries_synced", mergeCategoryGalleries);
+      window.removeEventListener("cloud_user_categories_synced", mergeSyncedUserCategories);
       window.removeEventListener("cloud_categories_synced", removeDeletedCategories);
       window.removeEventListener("cloud_poses_synced", removeDeletedPoses);
     };
@@ -918,6 +938,24 @@ export default function App() {
   const handleAddCategory = (section: "kyyeu" | "canhan", newCat: CategoryItem) => {
     const updater = section === "kyyeu" ? setKyyeuData : setCanhanData;
     updater((prev) => [...prev, { ...newCat, images: newCat.images || [] }]);
+    void syncRecord("personalConcept", `library-category:${section}:${newCat.id}`, {
+      kind: "posing-art-category-v1",
+      section,
+      category: { ...newCat, images: newCat.images || [] },
+    });
+  };
+
+  const handleRepublishCategories = async () => {
+    if (!isAdminSessionVerified || isRepublishingCategories) return;
+    setIsRepublishingCategories(true);
+    try {
+      const result = await republishLibraryCategories({ kyyeu: kyyeuData, canhan: canhanData });
+      window.alert(`Đã đẩy ${result.upserted} danh mục tùy chỉnh lên cloud.`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể đồng bộ lại danh mục.");
+    } finally {
+      setIsRepublishingCategories(false);
+    }
   };
 
   const saveLibraryRename = async (rename: Omit<LibraryRename, "id" | "kind">) => {
@@ -1603,6 +1641,17 @@ export default function App() {
                     <Plus className="w-3.5 h-3.5" />
                     <span>+ Thêm concept</span>
                   </button>
+                  {isAdminSessionVerified && (
+                    <button
+                      type="button"
+                      disabled={isRepublishingCategories}
+                      onClick={() => void handleRepublishCategories()}
+                      title="Đẩy lại danh mục tùy chỉnh trên thiết bị này lên cloud"
+                      className="text-[11px] font-bold text-sky-700 disabled:opacity-50 dark:text-sky-300"
+                    >
+                      <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />{isRepublishingCategories ? "Đang đẩy..." : "Đẩy lại cloud"}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Vertical Concept Cards */}
@@ -1647,6 +1696,17 @@ export default function App() {
             ) : currentSection === "kyyeu" && !isCategoryDetailOpen ? (
               /* PHẦN 1 (KỶ YẾU): CATEGORY CARDS, MATCHING PHẦN 2 */
               <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
+                {isAdminSessionVerified && (
+                  <button
+                    type="button"
+                    disabled={isRepublishingCategories}
+                    onClick={() => void handleRepublishCategories()}
+                    title="Đẩy lại danh mục tùy chỉnh trên thiết bị này lên cloud"
+                    className="self-end rounded-lg px-2 py-1 text-[11px] font-bold text-sky-700 disabled:opacity-50 dark:text-sky-300"
+                  >
+                    <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />{isRepublishingCategories ? "Đang đẩy..." : "Đẩy lại danh mục lên cloud"}</span>
+                  </button>
+                )}
                 {kyyeuData.map((cat, idx) => {
                   const isActive = idx === activeKyyeuCatIdx;
                   return (

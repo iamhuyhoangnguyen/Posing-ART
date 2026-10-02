@@ -55,6 +55,13 @@ export async function renameLibraryItem(request: {
   await adminRequest("/api/cloud/library/rename", "POST", request);
 }
 
+export async function republishLibraryCategories(categories: {
+  kyyeu: unknown[];
+  canhan: unknown[];
+}): Promise<{ upserted: number }> {
+  return await adminRequest("/api/cloud/categories/republish", "POST", categories) as { upserted: number };
+}
+
 export async function deletePoseFromCloud(request: { section: "kyyeu" | "canhan"; categoryId: string; poseKey: string }): Promise<void> {
   await adminRequest(`/api/cloud/pose/${encodeURIComponent(request.poseKey)}`, "DELETE", request);
 }

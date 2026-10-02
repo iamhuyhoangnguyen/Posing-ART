@@ -116,6 +116,56 @@ function isValidUserCloudRecord(record: unknown): record is UserCloudRecord {
   }
 }
 
+function getCloudCategoryRecordData(record: UserCloudRecord): { section: "kyyeu" | "canhan"; category: any } | null {
+  const data = record.data;
+  if (record.type !== "personalConcept" || data?.kind !== "posing-art-category-v1" ||
+    (data.section !== "kyyeu" && data.section !== "canhan")) return null;
+  const category = data.category;
+  if (!category || typeof category !== "object" || Array.isArray(category) ||
+    typeof category.id !== "string" || !category.id.trim() || category.id.length > 160 ||
+    typeof category.label !== "string" || !category.label.trim() || category.label.length > 100 ||
+    (category.images !== undefined && !Array.isArray(category.images)) ||
+    (category.poses !== undefined && !Array.isArray(category.poses)) ||
+    Buffer.byteLength(JSON.stringify(category) || "", "utf8") > 12 * 1024 * 1024) return null;
+  return { section: data.section, category };
+}
+
+function applyCloudCategoryRecord(record: UserCloudRecord, user: StoredUser): void {
+  const categoryData = getCloudCategoryRecordData(record);
+  if (!categoryData) return;
+  const { section, category } = categoryData;
+  const entryId = `user-category:${section}:${category.id}`;
+  const existingIndex = cloudStore.customCategories.findIndex((item) => item?.id === entryId && item?.kind === "userCategory");
+  const existing = existingIndex >= 0 ? cloudStore.customCategories[existingIndex] : undefined;
+  if (existing?.ownerUserId && existing.ownerUserId !== user.id && user.role !== "admin") return;
+
+  if (record.isDeleted) {
+    if (existingIndex >= 0) cloudStore.customCategories.splice(existingIndex, 1);
+    return;
+  }
+  const entry = {
+    id: entryId,
+    kind: "userCategory",
+    section,
+    categoryId: category.id,
+    category: structuredClone(category),
+    ownerUserId: existing?.ownerUserId || user.id,
+  };
+  if (existingIndex >= 0) cloudStore.customCategories[existingIndex] = entry;
+  else cloudStore.customCategories.push(entry);
+}
+
+function createCloudCategoryEntry(section: "kyyeu" | "canhan", category: any, ownerUserId: string, existing?: any) {
+  return {
+    id: `user-category:${section}:${category.id}`,
+    kind: "userCategory",
+    section,
+    categoryId: category.id,
+    category: structuredClone(category),
+    ownerUserId: existing?.ownerUserId || ownerUserId,
+  };
+}
+
 interface StoredUser {
   id: string;
   username: string;
@@ -1032,7 +1082,7 @@ app.get("/api/cloud/sync", (_req, res) => {
     success: true,
     photos,
     customPoses: cloudStore.customPoses,
-    customCategories: cloudStore.customCategories.map(({ shareToken: _shareToken, ...category }) => category),
+    customCategories: cloudStore.customCategories.map(({ shareToken: _shareToken, ownerUserId: _ownerUserId, ...category }) => category),
     deletedCategories: cloudStore.deletedCategories,
     deletedPoseKeys: cloudStore.deletedPoseKeys,
     updatedAt: cloudStore.updatedAt,
@@ -1630,6 +1680,7 @@ app.delete("/api/cloud/category/:id", asyncRoute(async (req, res) => {
   );
   cloudStore.customCategories = cloudStore.customCategories.filter((category) => category?.id !== topic.categoryId &&
     category?.id !== `category-gallery:${topic.section}:${topic.categoryId}` &&
+    !(category?.kind === "userCategory" && category.section === topic.section && category.categoryId === topic.categoryId) &&
     !(category?.kind === "libraryRename" && category.section === topic.section && category.categoryId === topic.categoryId));
   cloudStore.records = cloudStore.records.filter((record) =>
     !isTopicOwnedRecord(record, topic.section, topic.categoryId, poseKeys)
@@ -1682,6 +1733,42 @@ app.post("/api/cloud/library/rename", asyncRoute(async (req, res) => {
   else cloudStore.customCategories.push(override);
   await saveStore();
   return res.json({ success: true, rename: override });
+}));
+
+app.post("/api/cloud/categories/republish", asyncRoute(async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+  const { kyyeu, canhan } = req.body || {};
+  if (!Array.isArray(kyyeu) || !Array.isArray(canhan) || kyyeu.length + canhan.length > 500) {
+    return res.status(400).json({ success: false, error: "Danh sách danh mục không hợp lệ." });
+  }
+  const builtInIds = new Set([...INITIAL_DATA_KYYEU, ...INITIAL_DATA_CANHAN].map((category) => category.id));
+  let upserted = 0;
+  for (const [section, categories] of [["kyyeu", kyyeu], ["canhan", canhan]] as const) {
+    for (const category of categories) {
+      if (!category || typeof category !== "object" || Array.isArray(category) ||
+        typeof category.id !== "string" || !category.id.trim() || category.id.length > 160 ||
+        typeof category.label !== "string" || !category.label.trim() || category.label.length > 100 ||
+        (category.images !== undefined && !Array.isArray(category.images)) ||
+        (category.poses !== undefined && !Array.isArray(category.poses)) ||
+        Buffer.byteLength(JSON.stringify(category) || "", "utf8") > 12 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: "Có danh mục không hợp lệ hoặc quá lớn." });
+      }
+      if (builtInIds.has(category.id) || category.id === UNCATEGORIZED_CATEGORY_ID) continue;
+      const id = `user-category:${section}:${category.id}`;
+      const existing = cloudStore.customCategories.find((item) => item?.id === id && item?.kind === "userCategory");
+      const entry = createCloudCategoryEntry(section, category, admin.id, existing);
+      if (existing) {
+        const index = cloudStore.customCategories.indexOf(existing);
+        cloudStore.customCategories[index] = entry;
+      } else {
+        cloudStore.customCategories.push(entry);
+      }
+      upserted++;
+    }
+  }
+  await saveStore();
+  return res.json({ success: true, upserted });
 }));
 
 app.delete("/api/cloud/pose/:id", asyncRoute(async (req, res) => {
@@ -1839,20 +1926,24 @@ app.post("/api/user/sync", asyncRoute(async (req, res) => {
         const existing = cloudStore.records[existingIdx];
         // Last-Write-Wins: compare updatedAt
         if (incoming.updatedAt >= existing.updatedAt) {
-          cloudStore.records[existingIdx] = {
+          const acceptedRecord = {
             ...incoming,
             userId,
           };
+          cloudStore.records[existingIdx] = acceptedRecord;
+          applyCloudCategoryRecord(acceptedRecord, user);
           updatedCount++;
         } else {
           // Conflict: existing on server is newer
           conflicts.push(existing);
         }
       } else {
-        cloudStore.records.push({
+        const acceptedRecord = {
           ...incoming,
           userId,
-        });
+        };
+        cloudStore.records.push(acceptedRecord);
+        applyCloudCategoryRecord(acceptedRecord, user);
         updatedCount++;
       }
     }
@@ -1919,6 +2010,7 @@ app.post("/api/user/record", asyncRoute(async (req, res) => {
       const existing = cloudStore.records[existingIdx];
       if (itemToSave.updatedAt >= existing.updatedAt) {
         cloudStore.records[existingIdx] = itemToSave;
+        applyCloudCategoryRecord(itemToSave, user);
         await saveStore();
         operation = "updated";
       } else {
@@ -1926,6 +2018,7 @@ app.post("/api/user/record", asyncRoute(async (req, res) => {
       }
     } else {
       cloudStore.records.push(itemToSave);
+      applyCloudCategoryRecord(itemToSave, user);
       await saveStore();
     }
 

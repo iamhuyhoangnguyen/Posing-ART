@@ -212,6 +212,9 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     connected = true;
 
     const cloudData: CloudSyncResponse = await res.json();
+    window.dispatchEvent(new CustomEvent("cloud_user_categories_synced", {
+      detail: { categories: (cloudData.customCategories || []).filter((item: any) => item?.kind === "userCategory" && item.category) },
+    }));
     const legacyPoseKeyMap = createLegacyPoseKeyMap(
       [
         { section: "kyyeu", categories: INITIAL_DATA_KYYEU },
