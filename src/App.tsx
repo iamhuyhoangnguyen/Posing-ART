@@ -60,6 +60,7 @@ import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } f
 import { saveImageToDevice } from "./services/platformService";
 import { categoryGalleryKey, UNCATEGORIZED_CATEGORY_ID, UNCATEGORIZED_CATEGORY_LABEL } from "./utils/categoryGallery";
 import { serverUrl } from "./services/apiUrl";
+import { getOrCreateCategoryShareToken } from "./services/categoryShareService";
 import { SectionCoverActionsMenu } from "./components/SectionCoverActionsMenu";
 import { googleLensSearchUrl } from "./utils/googleLens";
 import { isSeedPhotoUrl, withoutSeedCategoryCover, withoutSeedGalleryPhotos } from "./utils/seedGalleryPhotos";
@@ -265,7 +266,8 @@ export default function App() {
   const [categoryDeleteCandidate, setCategoryDeleteCandidate] = useState<CategoryDeleteCandidate | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
   const [categoryDeleteError, setCategoryDeleteError] = useState("");
-  const [qrShareTarget, setQrShareTarget] = useState<{ section: "kyyeu" | "canhan"; categoryId: string; label: string } | null>(null);
+  const [qrShareTarget, setQrShareTarget] = useState<{ label: string; shareUrl: string } | null>(null);
+  const [isCreatingQr, setIsCreatingQr] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
@@ -626,11 +628,17 @@ export default function App() {
     setSearchQuery("");
   }, [kyyeuData, canhanData]);
 
-  const categoryShareUrl = (section: "kyyeu" | "canhan", categoryId: string) => {
-    const url = new URL(Capacitor.isNativePlatform() ? "https://posing-art-fn3f.vercel.app" : window.location.href);
-    url.searchParams.set("section", section);
-    url.searchParams.set("category", categoryId);
-    return url.toString();
+  const createCategoryQr = async (section: "kyyeu" | "canhan", categoryId: string, label: string) => {
+    if (isCreatingQr) return;
+    setIsCreatingQr(true);
+    try {
+      const shareToken = await getOrCreateCategoryShareToken(section, categoryId);
+      setQrShareTarget({ label, shareUrl: `https://posing-art-fn3f.vercel.app/share/${shareToken}` });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể tạo mã QR chia sẻ.");
+    } finally {
+      setIsCreatingQr(false);
+    }
   };
 
   const openLibraryCategory = (section: "kyyeu" | "canhan", categoryIndex: number) => {
@@ -1609,8 +1617,8 @@ export default function App() {
                     </button>
                   )}
                   {currentCategoryIsPublic && (
-                    <button type="button" onClick={() => setQrShareTarget({ section: currentSection, categoryId: currentCategory.id, label: currentCategory.label })} title="Tạo mã QR chia sẻ danh mục công khai" className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-bold text-zinc-700 hover:border-amber-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 sm:px-3">
-                      <QrCode className="h-4 w-4" /><span className="hidden sm:inline">Mã QR</span>
+                    <button type="button" disabled={isCreatingQr} onClick={() => void createCategoryQr(currentSection as "kyyeu" | "canhan", currentCategory.id, currentCategory.label)} title="Tạo mã QR chia sẻ danh mục công khai" className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-bold text-zinc-700 hover:border-amber-400 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 sm:px-3">
+                      <QrCode className="h-4 w-4" /><span className="hidden sm:inline">{isCreatingQr ? "Đang tạo…" : "Mã QR"}</span>
                     </button>
                   )}
                 </div>
@@ -1830,7 +1838,7 @@ export default function App() {
       {qrShareTarget && (
         <CategoryShareQrModal
           categoryLabel={qrShareTarget.label}
-          shareUrl={categoryShareUrl(qrShareTarget.section, qrShareTarget.categoryId)}
+          shareUrl={qrShareTarget.shareUrl}
           onClose={() => setQrShareTarget(null)}
         />
       )}

@@ -38,7 +38,7 @@ export const CategoryShareQrModal: React.FC<CategoryShareQrModalProps> = ({ cate
           <QRCodeCanvas ref={canvasRef} value={shareUrl} size={240} level="M" includeMargin title={`Mã QR danh mục ${categoryLabel}`} />
         </div>
         <p className="mt-4 break-all rounded-xl bg-zinc-100 p-3 text-left text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{shareUrl}</p>
-        <p className="mt-2 text-xs text-zinc-500">Quét mã để mở danh mục công khai trên web.</p>
+        <p className="mt-2 text-xs text-zinc-500">Link công khai vĩnh viễn, ai có link đều có thể xem ảnh trong danh mục.</p>
         <button type="button" onClick={downloadQr} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-bold text-zinc-950 hover:bg-amber-400">
           <Download className="h-4 w-4" />Tải ảnh QR
         </button>

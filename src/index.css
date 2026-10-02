@@ -151,3 +151,8 @@ html.theme-transition *::after {
   transition-duration: 250ms !important;
   transition-timing-function: ease !important;
 }
+.public-share-image {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}

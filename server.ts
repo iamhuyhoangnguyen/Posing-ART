@@ -892,6 +892,73 @@ app.get("/api/cloud/status", (_req, res) => {
   });
 });
 
+// Permanent public category sharing; public reads expose image references only.
+app.post("/api/share/category-token", asyncRoute(async (req, res) => {
+  if (!requireUser(req, res)) return;
+  const { section, categoryId } = req.body || {};
+  if ((section !== "kyyeu" && section !== "canhan") || typeof categoryId !== "string" || !categoryId.trim() || categoryId.length > 160) {
+    return res.status(400).json({ success: false, error: "Danh mục không hợp lệ" });
+  }
+  const builtInCategories = section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN;
+  const known = builtInCategories.some((category) => category.id === categoryId);
+  const galleryId = `category-gallery:${section}:${categoryId}`;
+  let gallery = cloudStore.customCategories.find((item) => item?.id === galleryId && item?.kind === "categoryGallery");
+  if (!known && !gallery) return res.status(404).json({ success: false, error: "Không tìm thấy danh mục công khai" });
+  const galleryWasCreated = !gallery;
+  const previousGallery = gallery ? structuredClone(gallery) : undefined;
+  if (!gallery) {
+    const galleryKey = categoryGalleryKey(section, categoryId);
+    gallery = { id: galleryId, kind: "categoryGallery", section, categoryId, galleryKey, images: [] };
+    cloudStore.customCategories.push(gallery);
+  }
+  if (typeof gallery.shareToken !== "string" || gallery.shareToken.length < 32) {
+    let token: string;
+    do {
+      token = randomBytes(32).toString("base64url");
+    } while (cloudStore.customCategories.some((item) => item !== gallery && item?.shareToken === token));
+    gallery.shareToken = token;
+    gallery.section = section;
+    gallery.categoryId = categoryId;
+    gallery.galleryKey ||= categoryGalleryKey(section, categoryId);
+    gallery.images ||= [];
+    try {
+      await saveStore();
+    } catch (error) {
+      if (galleryWasCreated) cloudStore.customCategories = cloudStore.customCategories.filter((item) => item !== gallery);
+      else {
+        const galleryIndex = cloudStore.customCategories.indexOf(gallery);
+        if (galleryIndex >= 0 && previousGallery) cloudStore.customCategories[galleryIndex] = previousGallery;
+      }
+      throw error;
+    }
+  }
+  res.json({ success: true, shareToken: gallery.shareToken });
+}));
+
+app.get("/api/share/:shareToken", (req, res) => {
+  const token = req.params.shareToken;
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return res.status(404).json({ success: false, error: "Không tìm thấy danh mục được chia sẻ" });
+  const gallery = cloudStore.customCategories.find((item) => item?.kind === "categoryGallery" && item?.shareToken === token);
+  if (!gallery || typeof gallery.galleryKey !== "string") return res.status(404).json({ success: false, error: "Không tìm thấy danh mục được chia sẻ" });
+  const approvedPhotos = cloudStore.photos.filter((photo) => photo.poseKey === gallery.galleryKey && photo.status === "approved");
+  const photoById = new Map<string, CloudPhotoItem>(approvedPhotos.map((photo) => [photo.id, photo]));
+  const orderedIds = Array.isArray(gallery.images)
+    ? gallery.images.map((image: any) => image?.photoId).filter((id: unknown): id is string => typeof id === "string")
+    : [];
+  const orderedPhotos: CloudPhotoItem[] = orderedIds.flatMap((id: string) => {
+    const photo = photoById.get(id);
+    return photo ? [photo] : [];
+  });
+  const includedIds = new Set(orderedPhotos.map((photo) => photo.id));
+  const images = [...orderedPhotos, ...approvedPhotos.filter((photo) => !includedIds.has(photo.id))]
+    .filter((photo) => typeof photo.dataUrl === "string" && /^data:image\//.test(photo.dataUrl))
+    .map((photo) => `/api/cloud/photo/${encodeURIComponent(photo.id)}/image`);
+  const category = (gallery.section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN)
+    .find((item) => item.id === gallery.categoryId);
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ success: true, categoryName: category?.label || "Danh mục", images });
+});
+
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
   const metadataOnly = _req.query.metadataOnly === "true";
@@ -910,7 +977,7 @@ app.get("/api/cloud/sync", (_req, res) => {
     success: true,
     photos,
     customPoses: cloudStore.customPoses,
-    customCategories: cloudStore.customCategories,
+    customCategories: cloudStore.customCategories.map(({ shareToken: _shareToken, ...category }) => category),
     deletedCategories: cloudStore.deletedCategories,
     deletedPoseKeys: cloudStore.deletedPoseKeys,
     updatedAt: cloudStore.updatedAt,
@@ -927,7 +994,7 @@ app.get("/api/cloud/photo/:id/content", (req, res) => {
 // Stable public image URL used by visual-search providers such as Google Lens.
 app.get("/api/cloud/photo/:id/image", (req, res) => {
   const photo = cloudStore.photos.find((item) => item.id === req.params.id);
-  if (!photo) return res.status(404).send("Image not found");
+  if (!photo || photo.status !== "approved") return res.status(404).send("Image not found");
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/.exec(photo.dataUrl || "");
   if (!match) return res.status(415).send("Unsupported image data");
   res.setHeader("Content-Type", match[1]);
