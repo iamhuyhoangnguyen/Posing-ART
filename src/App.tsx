@@ -1532,6 +1532,7 @@ export default function App() {
                         isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                         onDelete={() => void requestCategoryDeletion("canhan", cat, idx)}
                         onRename={() => promptRenameCategory("canhan", cat)}
+                        onChangeCover={() => setActiveEditCover({ type: "category", categoryId: cat.id, title: `Ảnh Đại Diện: ${cat.label}`, subtitle: "Chỉnh sửa ảnh đại diện cho toàn bộ danh mục này", currentImage: cat.coverImage })}
                         onShare={() => void shareLibraryItem(cat.label, `${(cat.images?.filter((image) => !image.photoId).length || 0) + (photoCounts[categoryGalleryKey("canhan", cat.id)] || 0)} ảnh trong ${sectionNames.canhan}.`)}
                         onDownload={() => void downloadCategoryPhotos("canhan", cat)}
                         onSelect={() => {
@@ -1571,6 +1572,7 @@ export default function App() {
                       isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                       onDelete={() => void requestCategoryDeletion("kyyeu", cat, idx)}
                       onRename={() => promptRenameCategory("kyyeu", cat)}
+                      onChangeCover={() => setActiveEditCover({ type: "category", categoryId: cat.id, title: `Ảnh Đại Diện: ${cat.label}`, subtitle: "Chỉnh sửa ảnh đại diện cho toàn bộ danh mục này", currentImage: cat.coverImage })}
                       onShare={() => void shareLibraryItem(cat.label, `${(cat.images?.filter((image) => !image.photoId).length || 0) + (photoCounts[categoryGalleryKey("kyyeu", cat.id)] || 0)} ảnh trong ${sectionNames.kyyeu}.`)}
                       onDownload={() => void downloadCategoryPhotos("kyyeu", cat)}
                       onSelect={() => {

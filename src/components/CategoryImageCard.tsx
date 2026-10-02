@@ -12,6 +12,7 @@ interface CategoryImageCardProps {
   isAdmin?: boolean;
   onDelete?: () => void;
   onRename?: () => void;
+  onChangeCover?: () => void;
   onShare?: () => void;
   onDownload?: () => void;
 }
@@ -25,6 +26,7 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
   isAdmin = false,
   onDelete,
   onRename,
+  onChangeCover,
   onShare,
   onDownload,
 }) => (
@@ -72,8 +74,8 @@ export const CategoryImageCard: React.FC<CategoryImageCardProps> = ({
       </div>
     </div>
   </button>
-  {isAdmin && onDelete && onRename && onShare && onDownload && (
-    <AdminItemActionsMenu label={category.label} onDelete={onDelete} onRename={onRename} onShare={onShare} onDownload={onDownload} />
+  {isAdmin && onDelete && onRename && onChangeCover && onShare && onDownload && (
+    <AdminItemActionsMenu label={category.label} onDelete={onDelete} onRename={onRename} onChangeCover={onChangeCover} onShare={onShare} onDownload={onDownload} />
   )}
   </div>
 );

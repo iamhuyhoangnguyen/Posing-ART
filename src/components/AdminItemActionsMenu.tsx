@@ -1,15 +1,16 @@
 import React, { useRef, useState } from "react";
-import { Download, MoreVertical, Pencil, Share2, Trash2 } from "lucide-react";
+import { Download, Image as ImageIcon, MoreVertical, Pencil, Share2, Trash2 } from "lucide-react";
 
 interface AdminItemActionsMenuProps {
   label: string;
   onShare: () => void;
   onDownload: () => void;
   onRename: () => void;
+  onChangeCover: () => void;
   onDelete: () => void;
 }
 
-export const AdminItemActionsMenu: React.FC<AdminItemActionsMenuProps> = ({ label, onShare, onDownload, onRename, onDelete }) => {
+export const AdminItemActionsMenu: React.FC<AdminItemActionsMenuProps> = ({ label, onShare, onDownload, onRename, onChangeCover, onDelete }) => {
   const [open, setOpen] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
@@ -48,6 +49,7 @@ export const AdminItemActionsMenu: React.FC<AdminItemActionsMenuProps> = ({ labe
           <button type="button" onClick={action(onShare)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"><Share2 className="h-3.5 w-3.5" />Chia sẻ</button>
           <button type="button" onClick={action(onDownload)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"><Download className="h-3.5 w-3.5" />Tải xuống toàn bộ</button>
           <button type="button" onClick={action(onRename)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-3.5 w-3.5" />Đổi tên</button>
+          <button type="button" onClick={action(onChangeCover)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800"><ImageIcon className="h-3.5 w-3.5" />Đổi ảnh bìa</button>
           <button type="button" onClick={action(onDelete)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"><Trash2 className="h-3.5 w-3.5" />Xóa vĩnh viễn</button>
         </div>
       )}
