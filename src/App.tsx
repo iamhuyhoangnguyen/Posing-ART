@@ -53,8 +53,7 @@ const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSe
 import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, type CategoryDeletionPreview } from "./services/categoryAdminService";
-import { isCurrentUserAdmin } from "./utils/userAuth";
-import { isAdminAuthenticated } from "./utils/adminAuth";
+import { verifyAdminSession } from "./utils/adminAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
@@ -268,6 +267,7 @@ export default function App() {
   const [categoryDeleteError, setCategoryDeleteError] = useState("");
   const [qrShareTarget, setQrShareTarget] = useState<{ label: string; shareUrl: string } | null>(null);
   const [isCreatingQr, setIsCreatingQr] = useState(false);
+  const [isAdminSessionVerified, setIsAdminSessionVerified] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
@@ -282,6 +282,50 @@ export default function App() {
     return () => {
       window.removeEventListener("online", updateNetworkState);
       window.removeEventListener("offline", updateNetworkState);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let checking = false;
+    let retryTimer: number | null = null;
+    const verifyAdmin = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const result = await verifyAdminSession();
+        if (!active) return;
+        if (result === "admin" || result === "denied") {
+          setIsAdminSessionVerified(result === "admin");
+          if (retryTimer !== null) window.clearTimeout(retryTimer);
+          retryTimer = null;
+        } else if (retryTimer === null) {
+          // Keep the last verified result on transient failures; initial state remains false.
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            void verifyAdmin();
+          }, 5_000);
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    const handleAuthChange = () => { void verifyAdmin(); };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void verifyAdmin();
+    };
+    void verifyAdmin();
+    window.addEventListener("auth_state_changed", handleAuthChange);
+    document.addEventListener("visibilitychange", handleVisibility);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void verifyAdmin();
+    }, 90_000);
+    return () => {
+      active = false;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      window.removeEventListener("auth_state_changed", handleAuthChange);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -679,6 +723,48 @@ export default function App() {
     await refreshPhotoCounts();
     if (galleryKey) setFlatGalleryPhotos(await getPhotosForPose(galleryKey));
   };
+  useEffect(() => {
+    let active = true;
+    let syncing = false;
+    let interval: number | null = null;
+    const syncWhileVisible = async () => {
+      if (!active || syncing || document.visibilityState !== "visible") return;
+      syncing = true;
+      try {
+        const { performCloudSync } = await import("./utils/cloudSync");
+        await Promise.all([performCloudSync(), performFullSync()]);
+        await refreshPhotoCounts();
+        if (galleryKey) setFlatGalleryPhotos(await getPhotosForPose(galleryKey));
+      } catch (error) {
+        console.warn("Foreground sync failed:", error);
+      } finally {
+        syncing = false;
+      }
+    };
+    const stopInterval = () => {
+      if (interval !== null) window.clearInterval(interval);
+      interval = null;
+    };
+    const startInterval = () => {
+      stopInterval();
+      interval = window.setInterval(() => { void syncWhileVisible(); }, 90_000);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startInterval();
+        void syncWhileVisible();
+      } else {
+        stopInterval();
+      }
+    };
+    if (document.visibilityState === "visible") startInterval();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      active = false;
+      stopInterval();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [galleryKey]);
   const galleryPhotoUrls = useMemo(() => flatGalleryPhotos.map((photo) => ({
     photo,
     url: URL.createObjectURL(photo.blob),
@@ -753,7 +839,7 @@ export default function App() {
 
   const deleteGalleryViewerItem = async () => {
     const item = galleryLightboxIndex === null ? undefined : galleryViewerItems[galleryLightboxIndex];
-    if (!item || (!item.cloudId && !item.localPhoto) || !(isCurrentUserAdmin() || isAdminAuthenticated())) return;
+    if (!item || (!item.cloudId && !item.localPhoto) || !isAdminSessionVerified) return;
     if (!window.confirm("Bạn có chắc muốn xóa ảnh này khỏi danh mục và Cloud Drive?")) return;
     try {
       if (item.localPhoto) await deletePhoto(item.localPhoto.id, item.cloudId);
@@ -835,7 +921,7 @@ export default function App() {
   };
 
   const saveLibraryRename = async (rename: Omit<LibraryRename, "id" | "kind">) => {
-    if (!isCurrentUserAdmin()) return;
+    if (!isAdminSessionVerified) return;
     try {
       await renameLibraryItem({ kind: rename.targetKind, section: rename.section, categoryId: rename.categoryId, poseId: rename.poseId, label: rename.label });
       const id = `rename:${rename.targetKind}:${rename.section}:${rename.categoryId || ""}:${rename.poseId || ""}`;
@@ -851,7 +937,7 @@ export default function App() {
   };
 
   const promptRenameSection = (section: "kyyeu" | "canhan") => {
-    if (!isCurrentUserAdmin()) return;
+    if (!isAdminSessionVerified) return;
     const currentName = sectionNames[section];
     const nextName = window.prompt("Nhập tên mới:", currentName)?.trim();
     if (!nextName || nextName === currentName) return;
@@ -861,7 +947,7 @@ export default function App() {
   };
 
   const promptRenameCategory = (section: "kyyeu" | "canhan", category: CategoryItem) => {
-    if (!isCurrentUserAdmin()) return;
+    if (!isAdminSessionVerified) return;
     const nextName = window.prompt("Nhập tên danh mục mới:", category.label)?.trim();
     if (!nextName || nextName === category.label) return;
     const siblings = (section === "kyyeu" ? kyyeuData : canhanData).filter((item) => item.id !== category.id);
@@ -989,7 +1075,7 @@ export default function App() {
   };
 
   const requestCategoryDeletion = async (section: "kyyeu" | "canhan", category: CategoryItem, categoryIndex: number) => {
-    if (!isCurrentUserAdmin()) return;
+    if (!isAdminSessionVerified) return;
     const galleryKey = categoryGalleryKey(section, category.id);
     const poseKeys = [...category.poses.map((pose, poseIndex) => pose.id || `${section}-${categoryIndex}-${poseIndex}`), galleryKey];
     const localPhotoCount = poseKeys.reduce((count, key) => count + (photoCounts[key] || 0), 0);
@@ -1241,7 +1327,7 @@ export default function App() {
                     subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
                     currentImage: kyyeuCover,
                   })}
-                  onRename={isCurrentUserAdmin() ? () => promptRenameSection("kyyeu") : undefined}
+                  onRename={isAdminSessionVerified ? () => promptRenameSection("kyyeu") : undefined}
                 />
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
@@ -1300,7 +1386,7 @@ export default function App() {
                     subtitle: "Thay đổi ảnh bìa hiển thị ngoài trang chủ",
                     currentImage: canhanCover,
                   })}
-                  onRename={isCurrentUserAdmin() ? () => promptRenameSection("canhan") : undefined}
+                  onRename={isAdminSessionVerified ? () => promptRenameSection("canhan") : undefined}
                 />
 
                 <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full border border-white/20">
@@ -1529,7 +1615,7 @@ export default function App() {
                         category={cat}
                         galleryImageCount={photoCounts[categoryGalleryKey("canhan", cat.id)] || 0}
                         isActive={isActive}
-                        isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
+                        isAdmin={isAdminSessionVerified && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                         onDelete={() => void requestCategoryDeletion("canhan", cat, idx)}
                         onRename={() => promptRenameCategory("canhan", cat)}
                         onChangeCover={() => setActiveEditCover({ type: "category", categoryId: cat.id, title: `Ảnh Đại Diện: ${cat.label}`, subtitle: "Chỉnh sửa ảnh đại diện cho toàn bộ danh mục này", currentImage: cat.coverImage })}
@@ -1569,7 +1655,7 @@ export default function App() {
                       category={cat}
                       galleryImageCount={photoCounts[categoryGalleryKey("kyyeu", cat.id)] || 0}
                       isActive={isActive}
-                      isAdmin={isCurrentUserAdmin() && cat.id !== UNCATEGORIZED_CATEGORY_ID}
+                      isAdmin={isAdminSessionVerified && cat.id !== UNCATEGORIZED_CATEGORY_ID}
                       onDelete={() => void requestCategoryDeletion("kyyeu", cat, idx)}
                       onRename={() => promptRenameCategory("kyyeu", cat)}
                       onChangeCover={() => setActiveEditCover({ type: "category", categoryId: cat.id, title: `Ảnh Đại Diện: ${cat.label}`, subtitle: "Chỉnh sửa ảnh đại diện cho toàn bộ danh mục này", currentImage: cat.coverImage })}
@@ -1794,7 +1880,7 @@ export default function App() {
               <button type="button" onClick={() => setIsCueCardOpen(true)} className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/20 px-2 text-[11px] font-bold text-white hover:bg-white/10 sm:gap-2 sm:px-3 sm:text-xs">
                 <Maximize className="h-4 w-4 shrink-0" /><span className="truncate">Cue card</span>
               </button>
-              {galleryViewerItems[galleryLightboxIndex].canDelete && (isCurrentUserAdmin() || isAdminAuthenticated()) && (
+              {galleryViewerItems[galleryLightboxIndex].canDelete && isAdminSessionVerified && (
                 <button type="button" onClick={() => void deleteGalleryViewerItem()} className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-2 text-[11px] font-bold text-white hover:bg-rose-500 sm:gap-2 sm:px-3 sm:text-xs">
                   <Trash2 className="h-4 w-4 shrink-0" /><span className="truncate">Xóa ảnh</span>
                 </button>
@@ -1849,6 +1935,7 @@ export default function App() {
           pose={activePoseModal.pose}
           categoryName={activePoseModal.categoryName}
           isCategoryGallery={activePoseModal.poseKey.startsWith("category-gallery:v3:")}
+          isAdminVerified={isAdminSessionVerified}
           reservedImageCount={activePoseModal.poseKey.startsWith("category-gallery:v3:") ? (currentCategory?.images?.filter((image) => !image.photoId).length || 0) : 0}
           poseKey={activePoseModal.poseKey}
           onClose={() => setActivePoseModal(null)}

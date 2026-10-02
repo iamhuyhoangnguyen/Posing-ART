@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { Download, Image as ImageIcon, MoreVertical, Pencil, Share2, Trash2 } from "lucide-react";
 
 interface AdminItemActionsMenuProps {
@@ -12,13 +12,6 @@ interface AdminItemActionsMenuProps {
 
 export const AdminItemActionsMenu: React.FC<AdminItemActionsMenuProps> = ({ label, onShare, onDownload, onRename, onChangeCover, onDelete }) => {
   const [open, setOpen] = useState(false);
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const didLongPress = useRef(false);
-  const pointerType = useRef<string>("");
-  const clearTimer = () => {
-    if (pressTimer.current) clearTimeout(pressTimer.current);
-    pressTimer.current = null;
-  };
   const action = (run: () => void) => (event: React.MouseEvent) => {
     event.stopPropagation();
     setOpen(false);
@@ -30,16 +23,9 @@ export const AdminItemActionsMenu: React.FC<AdminItemActionsMenuProps> = ({ labe
         type="button"
         aria-label={`Tùy chọn ${label}`}
         aria-expanded={open}
-        title="Tùy chọn quản trị (chạm giữ trên điện thoại)"
-        onPointerDown={(event) => { pointerType.current = event.pointerType; didLongPress.current = false; pressTimer.current = setTimeout(() => { didLongPress.current = true; setOpen(true); }, 550); }}
-        onPointerUp={clearTimer}
-        onPointerLeave={clearTimer}
+        title="Tùy chọn quản trị"
         onContextMenu={(event) => { event.preventDefault(); setOpen(true); }}
-        onClick={() => {
-          if (didLongPress.current) { didLongPress.current = false; return; }
-          if (pointerType.current === "touch") return;
-          setOpen((value) => !value);
-        }}
+        onClick={() => setOpen((value) => !value)}
         className="rounded-full border border-white/40 bg-black/65 p-2 text-white shadow-lg backdrop-blur hover:bg-black/80 active:scale-95"
       >
         <MoreVertical className="h-4 w-4" />

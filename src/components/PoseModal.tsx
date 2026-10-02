@@ -28,7 +28,6 @@ import {
   getRednoteSearchUrl,
   getInspirationSearchQuery,
 } from "../utils/inspirationLinks";
-import { isAdminAuthenticated } from "../utils/adminAuth";
 import { InspirationSearchLink } from "./InspirationSearchLink";
 import { getCurrentUser, isCurrentUserAdmin } from "../utils/userAuth";
 import { serverUrl } from "../services/apiUrl";
@@ -37,6 +36,7 @@ interface PoseModalProps {
   pose: PoseItem | null;
   categoryName: string;
   isCategoryGallery?: boolean;
+  isAdminVerified?: boolean;
   reservedImageCount?: number;
   poseKey: string;
   onClose: () => void;
@@ -49,6 +49,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
   pose,
   categoryName,
   isCategoryGallery = false,
+  isAdminVerified = false,
   reservedImageCount = 0,
   poseKey,
   onClose,
@@ -347,7 +348,7 @@ export const PoseModal: React.FC<PoseModalProps> = ({
     e.stopPropagation();
 
     // Check RBAC: Sub-accounts CANNOT delete photos!
-    const isAdmin = isCurrentUserAdmin() || isAdminAuthenticated();
+    const isAdmin = isAdminVerified;
     if (!isAdmin) {
       setPermissionNotice(
         "Bị từ chối: Tài khoản thành viên không có quyền xóa ảnh trên hệ thống chung."
@@ -599,9 +600,9 @@ export const PoseModal: React.FC<PoseModalProps> = ({
                           <button type="button" onClick={() => void sharePhoto(p)} className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2">
                             <Share2 className="w-3.5 h-3.5" /> Chia sẻ ảnh
                           </button>
-                          <button type="button" onClick={(e) => handleDeletePhotoClick(p, e)} title={isCurrentUserAdmin() ? "Xóa ảnh (Quản trị viên)" : "Tài khoản con không được xóa ảnh"} className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2">
+                          {isAdminVerified && <button type="button" onClick={(e) => handleDeletePhotoClick(p, e)} title="Xóa ảnh (Quản trị viên)" className="w-full rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2">
                             <Trash2 className="w-3.5 h-3.5" /> Xóa ảnh
-                          </button>
+                          </button>}
                         </div>
                       )}
                     </div>

@@ -824,6 +824,13 @@ app.post("/api/auth/refresh", (req, res) => {
   res.json({ success: true, token: createAuthToken(user) });
 });
 
+app.get("/api/auth/verify-admin", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const user = requireAdmin(req, res);
+  if (!user) return;
+  res.json({ success: true, userId: user.id, role: user.role });
+});
+
 // Register sub-account: NO Gmail or external account needed
 app.post("/api/auth/register", asyncRoute(async (req, res) => {
   try {
@@ -961,6 +968,7 @@ app.get("/api/share/:shareToken", (req, res) => {
 
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const metadataOnly = _req.query.metadataOnly === "true";
   const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
     id,
@@ -1676,6 +1684,7 @@ app.get("/api/version", (req, res) => {
 
 // 1. Get all cloud records for user (incremental with ?since=timestamp)
 app.get("/api/user/sync", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   try {
     const user = requireUser(req, res);
     if (!user) return;

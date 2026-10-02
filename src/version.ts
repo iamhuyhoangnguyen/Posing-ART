@@ -4,8 +4,8 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "3.1.2";
-export const APP_BUILD_NUMBER = 312;
+export const APP_VERSION = "3.2.0";
+export const APP_BUILD_NUMBER = 320;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 3.2.0: mở menu quản trị bằng một lần chạm, xác thực quyền với máy chủ và đồng bộ dữ liệu khi ứng dụng đang mở.",
   "Phiên bản 3.1.2: thêm mục đổi ảnh bìa danh mục trong menu quản lý ở Phần 1 và Phần 2.",
   "Phiên bản 3.1.1: tạo link QR công khai lâu dài để xem gallery danh mục không cần đăng nhập.",
   "Phiên bản 3.1.0: bỏ ảnh mặc định khỏi danh mục, thêm quay ảnh ngẫu nhiên, chia sẻ QR và chế độ Cue card toàn màn hình.",

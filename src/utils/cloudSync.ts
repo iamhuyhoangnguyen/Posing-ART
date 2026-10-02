@@ -265,8 +265,11 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
     // 3. Download photos from Cloud that aren't yet in local IndexedDB
     if (cloudData.photos && cloudData.photos.length > 0) {
       const db = await openDatabase();
-      for (const cp of cloudData.photos) {
-        if (!localCloudIds.has(cp.id)) {
+      const pendingPhotos = cloudData.photos.filter((photo) => !localCloudIds.has(photo.id));
+      let nextPhotoIndex = 0;
+      const downloadWorker = async () => {
+        while (nextPhotoIndex < pendingPhotos.length) {
+          const cp = pendingPhotos[nextPhotoIndex++];
           try {
             const contentRes = await fetch(serverUrl(`/api/cloud/photo/${encodeURIComponent(cp.id)}/content`));
             if (!contentRes.ok) throw new Error(`Cloud photo content request failed (${contentRes.status})`);
@@ -296,7 +299,10 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
             console.warn("Failed caching cloud photo to indexeddb", e);
           }
         }
-      }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(4, pendingPhotos.length) }, () => downloadWorker()),
+      );
     }
 
     // 4. Also merge custom categories / poses from Cloud into localStorage if any
