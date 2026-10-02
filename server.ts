@@ -69,13 +69,16 @@ interface CloudPhotoItem {
   poseKey: string;
   /** Original V2 pose key retained so a V3 migration can be rolled back. */
   legacyPoseKey?: string;
-  dataUrl: string;
   note?: string;
   uploadedBy?: string;
   uploaderRole?: "admin" | "member";
   status?: "approved";
   createdAt: number;
 }
+
+type CloudPhotoDocument = CloudPhotoItem & { dataUrl: string };
+type LegacyCloudPhotoItem = CloudPhotoItem & { dataUrl?: string };
+type LegacyCloudDriveData = Omit<Partial<CloudDriveData>, "photos"> & { photos?: LegacyCloudPhotoItem[] };
 
 const MAX_PHOTO_DATA_URL_LENGTH = 14_000_000;
 const PHOTO_TOO_LARGE_ERROR = "Ảnh quá lớn, vui lòng chọn ảnh nhỏ hơn 10 MB";
@@ -373,20 +376,23 @@ function createEmptyCloudStore(): CloudDriveData {
   };
 }
 
-function readLegacyStore(): Partial<CloudDriveData> | null {
+function readLegacyStore(): LegacyCloudDriveData | null {
   try {
     if (!fs.existsSync(STORE_PATH)) return null;
-    return JSON.parse(fs.readFileSync(STORE_PATH, "utf-8")) as Partial<CloudDriveData>;
+    return JSON.parse(fs.readFileSync(STORE_PATH, "utf-8")) as LegacyCloudDriveData;
   } catch (err) {
     console.error(`[MongoDB Migration] Could not read legacy store at ${STORE_PATH}:`, err);
     throw err;
   }
 }
 
-function normalizeCloudStore(input: Partial<CloudDriveData> | null): CloudDriveData {
+function normalizeCloudStore(input: LegacyCloudDriveData | Partial<CloudDriveData> | null): CloudDriveData {
   const data: CloudDriveData = { ...createEmptyCloudStore(), ...(input || {}) };
   data.users ||= [];
-  data.photos ||= [];
+  data.photos = (input?.photos || []).map((photo) => {
+    const { dataUrl: _dataUrl, ...metadata } = photo as LegacyCloudPhotoItem;
+    return metadata;
+  });
   data.records ||= [];
   data.customPoses ||= [];
   data.customCategories ||= [];
@@ -498,6 +504,44 @@ async function syncMongoCollection(
   }
 }
 
+async function importLegacyPhotoDocuments(photos: LegacyCloudPhotoItem[]): Promise<void> {
+  if (!mongoCollections || photos.length === 0) return;
+  await mongoCollections.photos.bulkWrite(photos.map((photo) => {
+    const { dataUrl, ...metadata } = photo;
+    return {
+      updateOne: {
+        filter: { _id: metadata.id },
+        update: {
+          $set: { ...metadata, ...(typeof dataUrl === "string" ? { dataUrl } : {}) },
+        },
+        upsert: true,
+      },
+    };
+  }), { ordered: false });
+}
+
+/** Syncs only photo metadata; image bytes remain untouched in MongoDB. */
+async function syncMongoPhotoMetadata(
+  collection: Collection<any>,
+  photos: CloudPhotoItem[],
+  previousPhotos?: CloudPhotoItem[],
+): Promise<void> {
+  if (!previousPhotos) {
+    console.warn("[MongoDB] Skipping cloud photo metadata sync because the previous photo snapshot is unavailable.");
+    return;
+  }
+  const previousById = new Map(previousPhotos.map((photo) => [photo.id, photo]));
+  const currentById = new Map(photos.map((photo) => [photo.id, photo]));
+  const operations = photos.flatMap((photo) => {
+    const previous = previousById.get(photo.id);
+    if (!previous || JSON.stringify(previous) === JSON.stringify(photo)) return [];
+    return [{ updateOne: { filter: { _id: photo.id }, update: { $set: { ...photo } } } }];
+  });
+  if (operations.length) await collection.bulkWrite(operations, { ordered: false });
+  const removedIds = previousPhotos.filter((photo) => !currentById.has(photo.id)).map((photo) => photo.id);
+  if (removedIds.length) await collection.deleteMany({ _id: { $in: removedIds } });
+}
+
 async function persistMongoStore(data: CloudDriveData, previousData?: CloudDriveData): Promise<void> {
   if (!mongoCollections) throw new Error("MongoDB storage is not initialized.");
   const currentPoseIds = customPoseStorageIds(data.customPoses);
@@ -507,7 +551,6 @@ async function persistMongoStore(data: CloudDriveData, previousData?: CloudDrive
     _id: user.id,
     usernameKey: user.username.toLowerCase(),
   }));
-  const toPhotoDocuments = (items: CloudPhotoItem[]) => items.map((photo) => ({ ...photo, _id: photo.id }));
   const toRecordDocuments = (items: UserCloudRecord[]) => items.map((record) => ({
     ...record,
     _id: `${record.userId}:${record.id}`,
@@ -522,7 +565,7 @@ async function persistMongoStore(data: CloudDriveData, previousData?: CloudDrive
   }));
   const writes: Promise<void>[] = [
     syncMongoCollection(mongoCollections.users, toUserDocuments(data.users), previousData && toUserDocuments(previousData.users)),
-    syncMongoCollection(mongoCollections.photos, toPhotoDocuments(data.photos), previousData && toPhotoDocuments(previousData.photos)),
+    syncMongoPhotoMetadata(mongoCollections.photos, data.photos, previousData?.photos),
     syncMongoCollection(mongoCollections.records, toRecordDocuments(data.records), previousData && toRecordDocuments(previousData.records)),
     syncMongoCollection(
       mongoCollections.customCategories,
@@ -560,7 +603,7 @@ async function loadMongoStore(): Promise<CloudDriveData> {
   const [metadata, users, photos, records, customPoses, customCategories] = await Promise.all([
     mongoCollections.metadata.findOne({ _id: "primary" }),
     mongoCollections.users.find({}).toArray(),
-    mongoCollections.photos.find({}).toArray(),
+    mongoCollections.photos.find({}, { projection: { dataUrl: 0 } }).toArray(),
     mongoCollections.records.find({}).toArray(),
     mongoCollections.customPoses.find({}).toArray(),
     mongoCollections.customCategories.find({}).toArray(),
@@ -627,7 +670,7 @@ async function initializeMongoStore(): Promise<CloudDriveData> {
     mongoCollections.customCategories.countDocuments(),
   ]);
   const isDatabaseEmpty = collectionCounts.every((count) => count === 0);
-  let initialData: Partial<CloudDriveData> | null = null;
+  let initialData: LegacyCloudDriveData | null = null;
   const resumeMigration = migration?.state === "importing";
   if (metadata?.legacyMigrationComplete !== true && (isDatabaseEmpty || resumeMigration)) {
     initialData = readLegacyStore();
@@ -643,6 +686,13 @@ async function initializeMongoStore(): Promise<CloudDriveData> {
     console.warn("[MongoDB Migration] MongoDB already contains data; preserving it and skipping JSON import.");
   }
 
+  if (initialData?.photos?.length) {
+    await importLegacyPhotoDocuments(initialData.photos);
+    initialData.photos = initialData.photos.map((photo) => {
+      const { dataUrl: _dataUrl, ...metadata } = photo;
+      return metadata;
+    });
+  }
   const loaded = await loadMongoStore();
   const normalized = normalizeCloudStore(initialData || loaded);
   if (!normalized.galleryV300MigrationComplete) {
@@ -735,7 +785,7 @@ async function initializeMongoStore(): Promise<CloudDriveData> {
     console.info(`[Gallery Seed Cleanup] Removed ${seedGalleryCleanup.removedCount} built-in pose photos from category galleries.`);
   }
   normalized.legacyMigrationComplete = true;
-  await persistMongoStore(normalized);
+  await persistMongoStore(normalized, loaded);
   lastPersistedStore = structuredClone(normalized);
   await mongoCollections.metadata.replaceOne(
     { _id: "legacy-migration" },
@@ -958,7 +1008,6 @@ app.get("/api/share/:shareToken", (req, res) => {
   });
   const includedIds = new Set(orderedPhotos.map((photo) => photo.id));
   const images = [...orderedPhotos, ...approvedPhotos.filter((photo) => !includedIds.has(photo.id))]
-    .filter((photo) => typeof photo.dataUrl === "string" && /^data:image\//.test(photo.dataUrl))
     .map((photo) => `/api/cloud/photo/${encodeURIComponent(photo.id)}/image`);
   const category = (gallery.section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN)
     .find((item) => item.id === gallery.categoryId);
@@ -969,12 +1018,10 @@ app.get("/api/share/:shareToken", (req, res) => {
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  const metadataOnly = _req.query.metadataOnly === "true";
-  const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, dataUrl, note, uploadedBy, uploaderRole, createdAt }) => ({
+  const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, note, uploadedBy, uploaderRole, createdAt }) => ({
     id,
     poseKey,
     legacyPoseKey,
-    ...(!metadataOnly ? { dataUrl } : {}),
     note,
     uploadedBy,
     uploaderRole,
@@ -993,23 +1040,32 @@ app.get("/api/cloud/sync", (_req, res) => {
 });
 
 // Fetch image bytes only for photos that are missing from the requesting device.
-app.get("/api/cloud/photo/:id/content", (req, res) => {
-  const photo = cloudStore.photos.find((item) => item.id === req.params.id);
-  if (!photo) return res.status(404).json({ success: false, error: "Không tìm thấy ảnh" });
+app.get("/api/cloud/photo/:id/content", asyncRoute(async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!mongoCollections) return res.status(503).json({ success: false, error: "Kho ảnh chưa sẵn sàng" });
+  const photo = await mongoCollections.photos.findOne(
+    { _id: req.params.id },
+    { projection: { _id: 0, id: 1, dataUrl: 1 } },
+  );
+  if (!photo || typeof photo.dataUrl !== "string") return res.status(404).json({ success: false, error: "Không tìm thấy ảnh" });
   res.json({ success: true, photo: { id: photo.id, dataUrl: photo.dataUrl } });
-});
+}));
 
 // Stable public image URL used by visual-search providers such as Google Lens.
-app.get("/api/cloud/photo/:id/image", (req, res) => {
-  const photo = cloudStore.photos.find((item) => item.id === req.params.id);
+app.get("/api/cloud/photo/:id/image", asyncRoute(async (req, res) => {
+  if (!mongoCollections) return res.status(503).send("Image store unavailable");
+  const photo = await mongoCollections.photos.findOne(
+    { _id: req.params.id },
+    { projection: { _id: 0, status: 1, dataUrl: 1 } },
+  );
   if (!photo || photo.status !== "approved") return res.status(404).send("Image not found");
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/.exec(photo.dataUrl || "");
   if (!match) return res.status(415).send("Unsupported image data");
   res.setHeader("Content-Type", match[1]);
-  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("Cache-Control", "public, max-age=86400, immutable");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(Buffer.from(match[2], "base64"));
-});
+}));
 
 const INSPIRATION_PAGE_HOSTS = ["pinterest.com", "pin.it", "xiaohongshu.com", "xhslink.com", "rednote.com"];
 const DROPPED_IMAGE_HOSTS = [...INSPIRATION_PAGE_HOSTS, "pinimg.com", "xhscdn.com", "xhscdn.net"];
@@ -1392,7 +1448,6 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
       ownerUserId: user.id,
       localPhotoId: typeof localPhotoId === "string" ? localPhotoId : undefined,
       poseKey: storagePoseKey,
-      dataUrl,
       note: note || "",
       uploadedBy: user.name || uploadedBy || "Thành viên",
       uploaderRole: role,
@@ -1400,19 +1455,49 @@ app.post("/api/cloud/upload-photo", asyncRoute(async (req, res) => {
       createdAt: Date.now(),
     };
 
-    cloudStore.photos.unshift(newPhoto);
-    if (storagePoseKey.startsWith("category-gallery:v3:")) {
-      const [, , section, categoryId] = storagePoseKey.split(":");
-      const galleryId = `category-gallery:${section}:${categoryId}`;
-      let gallery = cloudStore.customCategories.find((item) => item?.id === galleryId);
-      if (!gallery) {
-        gallery = { id: galleryId, kind: "categoryGallery", section, categoryId, galleryKey: storagePoseKey, images: [] };
-        cloudStore.customCategories.push(gallery);
+    if (!mongoCollections) throw new Error("MongoDB storage is not initialized.");
+    const photoDocument: CloudPhotoDocument = { ...newPhoto, dataUrl };
+    let insertAttempted = false;
+    let photoAddedToMemory = false;
+    let gallery: any;
+    let createdGallery = false;
+    let previousGalleryImages: any[] | undefined;
+    try {
+      insertAttempted = true;
+      await mongoCollections.photos.insertOne({ ...photoDocument, _id: photoDocument.id });
+      cloudStore.photos.unshift(newPhoto);
+      photoAddedToMemory = true;
+      if (storagePoseKey.startsWith("category-gallery:v3:")) {
+        const [, , section, categoryId] = storagePoseKey.split(":");
+        const galleryId = `category-gallery:${section}:${categoryId}`;
+        gallery = cloudStore.customCategories.find((item) => item?.id === galleryId);
+        if (!gallery) {
+          gallery = { id: galleryId, kind: "categoryGallery", section, categoryId, galleryKey: storagePoseKey, images: [] };
+          cloudStore.customCategories.push(gallery);
+          createdGallery = true;
+        } else {
+          previousGalleryImages = Array.isArray(gallery.images) ? [...gallery.images] : undefined;
+        }
+        gallery.images ||= [];
+        gallery.images = appendGalleryPhotoReferences(gallery.images, [newPhoto], storagePoseKey);
       }
-      gallery.images ||= [];
-      gallery.images = appendGalleryPhotoReferences(gallery.images, [newPhoto], storagePoseKey);
+      await saveStore();
+    } catch (error) {
+      if (photoAddedToMemory) cloudStore.photos = cloudStore.photos.filter((photo) => photo.id !== newPhoto.id);
+      if (createdGallery) {
+        cloudStore.customCategories = cloudStore.customCategories.filter((item) => item !== gallery);
+      } else if (gallery) {
+        gallery.images = previousGalleryImages;
+      }
+      if (insertAttempted) {
+        try {
+          await mongoCollections.photos.deleteOne({ _id: newPhoto.id });
+        } catch (rollbackError) {
+          console.error("[MongoDB] Failed to roll back uploaded photo document", { photoId: newPhoto.id, error: rollbackError });
+        }
+      }
+      throw error;
     }
-    await saveStore();
 
     res.json({ success: true, photo: newPhoto });
   } catch (err: any) {

@@ -13,7 +13,6 @@ export interface CloudPhotoItem {
   localPhotoId?: string;
   poseKey: string;
   legacyPoseKey?: string;
-  dataUrl?: string;
   note?: string;
   uploadedBy?: string;
   uploaderRole?: "admin" | "member";
@@ -206,7 +205,7 @@ async function performCloudSyncInternal(): Promise<CloudSyncResult> {
 
   try {
     // Read topic tombstones before uploading so pending photos from a deleted topic cannot be recreated.
-    const res = await fetch(serverUrl("/api/cloud/sync?metadataOnly=true"));
+    const res = await fetch(serverUrl("/api/cloud/sync"));
     if (!res.ok) {
       return { connected: false, downloaded: 0, uploaded, totalCloudPhotos: 0 };
     }
