@@ -2206,6 +2206,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.resolve(__dirname, "dist")));
+    app.use("/api", (_req, res) => {
+      res.status(404).json({ success: false, error: "Không tìm thấy API endpoint" });
+    });
     app.get("*", (_req, res) => {
       res.sendFile(path.resolve(__dirname, "dist", "index.html"));
     });

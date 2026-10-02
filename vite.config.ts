@@ -11,8 +11,8 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        // Keep the current page stable until the user chooses to reload into a new build.
-        registerType: 'prompt',
+        // Apply deployed service worker updates automatically without waiting for a prompt.
+        registerType: 'autoUpdate',
         includeAssets: ['icon.svg'],
         manifest: {
           name: 'POSING — Sổ Tay Tạo Dáng',
@@ -34,7 +34,15 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          skipWaiting: true,
+          clientsClaim: true,
+          // API URLs must never fall through to the precached SPA shell on navigation.
+          navigateFallbackDenylist: [/^\/api(?:\/|$)/],
           runtimeCaching: [
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            },
             {
               urlPattern: ({ request }) => request.destination === 'image',
               handler: 'CacheFirst',
