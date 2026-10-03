@@ -54,7 +54,7 @@ const AIIdeaAssistantSection = lazy(() => import("./components/AIIdeaAssistantSe
 import { exportSingleFileHtml } from "./utils/exportImport";
 import { getUserRecordsByType, performFullSync, syncRecord, syncSavedPose, purgeLocalRecordsForTopic } from "./services/syncService";
 import { deleteCategoryFromCloud, getDeletedCategoryKeys, previewCategoryDeletion, renameLibraryItem, republishLibraryCategories, type CategoryDeletionPreview } from "./services/categoryAdminService";
-import { verifyAdminSession } from "./utils/adminAuth";
+import { getAdminToken, verifyAdminSession } from "./utils/adminAuth";
 import { motion, type Variants } from "framer-motion";
 import { filterRecentPoseViews, RECENT_POSE_VIEW_TTL_MS, type RecentPoseView } from "./utils/recentPoseViews";
 import { saveImageToDevice } from "./services/platformService";
@@ -270,6 +270,7 @@ export default function App() {
   const [isCreatingQr, setIsCreatingQr] = useState(false);
   const [isAdminSessionVerified, setIsAdminSessionVerified] = useState(false);
   const [isRepublishingCategories, setIsRepublishingCategories] = useState(false);
+  const [isRecompressingPhotos, setIsRecompressingPhotos] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
   const [personalModalTab, setPersonalModalTab] = useState<"account" | "ai" | "sync" | "settings">("account");
   const [customModalConfig, setCustomModalConfig] = useState({ isOpen: false });
@@ -955,6 +956,33 @@ export default function App() {
       window.alert(error instanceof Error ? error.message : "Không thể đồng bộ lại danh mục.");
     } finally {
       setIsRepublishingCategories(false);
+    }
+  };
+
+  const handleRecompressPhotos = async () => {
+    if (!isAdminSessionVerified || isRecompressingPhotos) return;
+    const token = getAdminToken();
+    if (!token) return window.alert("Không tìm thấy phiên Admin. Vui lòng đăng nhập lại.");
+    setIsRecompressingPhotos(true);
+    try {
+      const send = (dryRun: boolean) => fetch(serverUrl("/api/cloud/admin/recompress-photos"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ dryRun, maxEdge: 1200, quality: 75 }),
+      });
+      const previewResponse = await send(true);
+      const preview = await previewResponse.json();
+      if (!previewResponse.ok || !preview.success) throw new Error(preview.error || "Không thể chạy thử nén ảnh.");
+      const savingsMb = (preview.savedBytes / 1024 / 1024).toFixed(1);
+      if (!window.confirm(`Chạy thử xong: ${preview.recompressed} ảnh có thể nén, dự kiến giảm ${savingsMb} MB; ${preview.skipped} ảnh không giảm đủ 20%, ${preview.failed} ảnh lỗi. Bạn muốn nén và lưu các ảnh đủ điều kiện?`)) return;
+      const resultResponse = await send(false);
+      const result = await resultResponse.json();
+      if (!resultResponse.ok || !result.success) throw new Error(result.error || "Không thể nén ảnh.");
+      window.alert(`Đã nén ${result.recompressed} ảnh, giảm khoảng ${(result.savedBytes / 1024 / 1024).toFixed(1)} MB. Bỏ qua ${result.skipped} ảnh; lỗi ${result.failed} ảnh.`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Không thể nén ảnh cũ.");
+    } finally {
+      setIsRecompressingPhotos(false);
     }
   };
 
@@ -1652,6 +1680,11 @@ export default function App() {
                       <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />{isRepublishingCategories ? "Đang đẩy..." : "Đẩy lại cloud"}</span>
                     </button>
                   )}
+                  {isAdminSessionVerified && (
+                    <button type="button" disabled={isRecompressingPhotos} onClick={() => void handleRecompressPhotos()} title="Chạy thử mức tiết kiệm rồi xác nhận trước khi ghi ảnh đã nén" className="text-[11px] font-bold text-amber-700 disabled:opacity-50 dark:text-amber-300">
+                      <span className="inline-flex items-center gap-1"><FileImage className="h-3.5 w-3.5" />{isRecompressingPhotos ? "Đang xử lý…" : "Nén ảnh cũ"}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Vertical Concept Cards */}
@@ -1697,15 +1730,14 @@ export default function App() {
               /* PHẦN 1 (KỶ YẾU): CATEGORY CARDS, MATCHING PHẦN 2 */
               <div className="flex flex-col gap-2.5 pb-2 pt-0.5">
                 {isAdminSessionVerified && (
-                  <button
-                    type="button"
-                    disabled={isRepublishingCategories}
-                    onClick={() => void handleRepublishCategories()}
-                    title="Đẩy lại danh mục tùy chỉnh trên thiết bị này lên cloud"
-                    className="self-end rounded-lg px-2 py-1 text-[11px] font-bold text-sky-700 disabled:opacity-50 dark:text-sky-300"
-                  >
-                    <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />{isRepublishingCategories ? "Đang đẩy..." : "Đẩy lại danh mục lên cloud"}</span>
-                  </button>
+                  <div className="flex justify-end gap-3">
+                    <button type="button" disabled={isRecompressingPhotos} onClick={() => void handleRecompressPhotos()} title="Chạy thử mức tiết kiệm rồi xác nhận trước khi ghi ảnh đã nén" className="rounded-lg px-2 py-1 text-[11px] font-bold text-amber-700 disabled:opacity-50 dark:text-amber-300">
+                      <span className="inline-flex items-center gap-1"><FileImage className="h-3.5 w-3.5" />{isRecompressingPhotos ? "Đang xử lý…" : "Nén ảnh cũ"}</span>
+                    </button>
+                    <button type="button" disabled={isRepublishingCategories} onClick={() => void handleRepublishCategories()} title="Đẩy lại danh mục tùy chỉnh trên thiết bị này lên cloud" className="rounded-lg px-2 py-1 text-[11px] font-bold text-sky-700 disabled:opacity-50 dark:text-sky-300">
+                      <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />{isRepublishingCategories ? "Đang đẩy..." : "Đẩy lại danh mục lên cloud"}</span>
+                    </button>
+                  </div>
                 )}
                 {kyyeuData.map((cat, idx) => {
                   const isActive = idx === activeKyyeuCatIdx;

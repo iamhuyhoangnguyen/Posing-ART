@@ -4,12 +4,12 @@
  * Single source of truth for Web and Android (.apk)
  */
 
-export const APP_VERSION = "3.2.2";
-export const APP_BUILD_NUMBER = 322;
+export const APP_VERSION = "3.2.3";
+export const APP_BUILD_NUMBER = 323;
 export const APP_NAME = "POSING ART";
 export const APP_SUBTITLE = "Sổ Tay Tạo Dáng & Trợ Lý Nhiếp Ảnh Thực Tế";
 export const APP_MINIMUM_SUPPORTED_VERSION = "1.0.0";
-export const APP_RELEASE_DATE = "2026-10-02";
+export const APP_RELEASE_DATE = "2026-10-03";
 
 export interface PlatformUpdateInfo {
   updateAvailable: boolean;
@@ -32,6 +32,7 @@ export interface VersionInfoResponse {
 }
 
 export const CURRENT_RELEASE_NOTES = [
+  "Phiên bản 3.2.3: nén ảnh trước khi tải lên, hỗ trợ admin nén ảnh cũ theo lô tuần tự và chạy thử mức tiết kiệm trước khi xác nhận.",
   "Phiên bản 3.2.2: đồng bộ danh mục tùy chỉnh lên cloud, có hàng đợi khi ngoại tuyến và công cụ admin đẩy lại danh mục.",
   "Phiên bản 3.2.1: giảm RAM server bằng cách chỉ giữ metadata ảnh và tải nội dung ảnh trực tiếp theo yêu cầu.",
   "Phiên bản 3.2.0: mở menu quản trị bằng một lần chạm, xác thực quyền với máy chủ và đồng bộ dữ liệu khi ứng dụng đang mở.",

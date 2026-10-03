@@ -8,6 +8,7 @@ import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 import { fileURLToPath } from "url";
 import { MongoClient } from "mongodb";
+import sharp from "sharp";
 import type { Collection, Db } from "mongodb";
 import { buildPoseAdvisorPrompt, parsePoseAdvisorResponse } from "./src/services/poseAdvisorService";
 import { withGeminiUnavailableRetry } from "./src/services/geminiRetry";
@@ -74,6 +75,7 @@ interface CloudPhotoItem {
   uploaderRole?: "admin" | "member";
   status?: "approved";
   createdAt: number;
+  imageVersion?: number;
 }
 
 type CloudPhotoDocument = CloudPhotoItem & { dataUrl: string };
@@ -1058,7 +1060,7 @@ app.get("/api/share/:shareToken", (req, res) => {
   });
   const includedIds = new Set(orderedPhotos.map((photo) => photo.id));
   const images = [...orderedPhotos, ...approvedPhotos.filter((photo) => !includedIds.has(photo.id))]
-    .map((photo) => `/api/cloud/photo/${encodeURIComponent(photo.id)}/image`);
+    .map((photo) => `/api/cloud/photo/${encodeURIComponent(photo.id)}/image${photo.imageVersion ? `?v=${photo.imageVersion}` : ""}`);
   const category = (gallery.section === "kyyeu" ? INITIAL_DATA_KYYEU : INITIAL_DATA_CANHAN)
     .find((item) => item.id === gallery.categoryId);
   res.setHeader("Cache-Control", "no-store");
@@ -1068,7 +1070,7 @@ app.get("/api/share/:shareToken", (req, res) => {
 // 2. Cloud Drive Full Sync (Fetch all shared photos & custom poses for any device)
 app.get("/api/cloud/sync", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, note, uploadedBy, uploaderRole, createdAt }) => ({
+  const photos = cloudStore.photos.map(({ id, poseKey, legacyPoseKey, note, uploadedBy, uploaderRole, createdAt, imageVersion }) => ({
     id,
     poseKey,
     legacyPoseKey,
@@ -1077,6 +1079,7 @@ app.get("/api/cloud/sync", (_req, res) => {
     uploaderRole,
     status: "approved" as const,
     createdAt,
+    imageVersion,
   }));
   res.json({
     success: true,
@@ -1106,13 +1109,17 @@ app.get("/api/cloud/photo/:id/image", asyncRoute(async (req, res) => {
   if (!mongoCollections) return res.status(503).send("Image store unavailable");
   const photo = await mongoCollections.photos.findOne(
     { _id: req.params.id },
-    { projection: { _id: 0, status: 1, dataUrl: 1 } },
+    { projection: { _id: 0, status: 1, dataUrl: 1, imageVersion: 1 } },
   );
   if (!photo || photo.status !== "approved") return res.status(404).send("Image not found");
+  if (photo.imageVersion && req.query.v !== String(photo.imageVersion)) {
+    res.setHeader("Cache-Control", "no-cache, must-revalidate");
+    return res.redirect(302, `/api/cloud/photo/${encodeURIComponent(req.params.id)}/image?v=${photo.imageVersion}`);
+  }
   const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/.exec(photo.dataUrl || "");
   if (!match) return res.status(415).send("Unsupported image data");
   res.setHeader("Content-Type", match[1]);
-  res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+  res.setHeader("Cache-Control", "no-cache, must-revalidate");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.send(Buffer.from(match[2], "base64"));
 }));
@@ -1605,6 +1612,66 @@ app.post("/api/cloud/admin/change-pin", asyncRoute(async (req, res) => {
   cloudStore.adminPin = hashPassword(newPin.trim());
   await saveStore();
   res.json({ success: true, message: "Đã cập nhật mã PIN Admin thành công" });
+}));
+
+app.post("/api/cloud/admin/recompress-photos", asyncRoute(async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (!requireAdmin(req, res)) return;
+  if (!mongoCollections) return res.status(503).json({ success: false, error: "Kho ảnh chưa sẵn sàng" });
+
+  const dryRun = req.body?.dryRun;
+  const maxEdge = req.body?.maxEdge ?? 1200;
+  const quality = req.body?.quality ?? 75;
+  if (typeof dryRun !== "boolean" || maxEdge !== 1200 || quality !== 75) {
+    return res.status(400).json({ success: false, error: "Tham số không hợp lệ; maxEdge phải là 1200 và quality phải là 75" });
+  }
+
+  const report = { scanned: 0, recompressed: 0, skipped: 0, failed: 0, originalBytes: 0, compressedBytes: 0, items: [] as Array<{ id: string; originalBytes: number; compressedBytes: number; status: string }> };
+  const cursor = mongoCollections.photos.find({}, { projection: { _id: 1, dataUrl: 1 } }).batchSize(1);
+  for await (const document of cursor) {
+    report.scanned += 1;
+    const dataUrl = typeof document.dataUrl === "string" ? document.dataUrl : "";
+    const match = /^data:image\/([a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+/=]+)$/.exec(dataUrl);
+    if (!match) {
+      report.failed += 1;
+      report.items.push({ id: String(document._id), originalBytes: 0, compressedBytes: 0, status: "invalid-image" });
+      continue;
+    }
+    const original = Buffer.from(match[2], "base64");
+    report.originalBytes += original.byteLength;
+    try {
+      const compressed = await sharp(original, { failOn: "none" })
+        .rotate()
+        .flatten({ background: "#ffffff" })
+        .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality, mozjpeg: true })
+        .toBuffer();
+      if (compressed.byteLength > original.byteLength * 0.8) {
+        report.skipped += 1;
+        report.compressedBytes += original.byteLength;
+        report.items.push({ id: String(document._id), originalBytes: original.byteLength, compressedBytes: original.byteLength, status: "under-20-percent-savings" });
+        continue;
+      }
+      report.compressedBytes += compressed.byteLength;
+      report.recompressed += 1;
+      report.items.push({ id: String(document._id), originalBytes: original.byteLength, compressedBytes: compressed.byteLength, status: dryRun ? "would-recompress" : "recompressed" });
+      if (!dryRun) {
+        const imageVersion = Date.now();
+        await mongoCollections.photos.updateOne(
+          { _id: document._id, dataUrl },
+          { $set: { dataUrl: `data:image/jpeg;base64,${compressed.toString("base64")}`, imageVersion } },
+        );
+        const metadata = cloudStore.photos.find((photo) => photo.id === String(document._id));
+        if (metadata) metadata.imageVersion = imageVersion;
+      }
+    } catch (error) {
+      report.failed += 1;
+      report.compressedBytes += original.byteLength;
+      report.items.push({ id: String(document._id), originalBytes: original.byteLength, compressedBytes: 0, status: error instanceof Error ? error.message : "compression-failed" });
+    }
+  }
+  if (!dryRun && report.recompressed > 0) await saveStore();
+  res.json({ success: true, dryRun, ...report, savedBytes: report.originalBytes - report.compressedBytes });
 }));
 
 function getTopicDeleteRequest(body: any): { section: "kyyeu" | "canhan"; categoryId: string; poseKeys: string[] } | null {

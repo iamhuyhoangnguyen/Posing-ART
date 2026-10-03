@@ -1,7 +1,7 @@
 {
   "name": "posing-art",
   "private": true,
-  "version": "3.2.2",
+  "version": "3.2.3",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -30,6 +30,7 @@
     "mongodb": "^7.6.0",
     "motion": "^12.23.24",
     "qrcode.react": "^4.2.0",
+    "sharp": "^0.34.5",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^8.3.0"

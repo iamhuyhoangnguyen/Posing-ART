@@ -18,6 +18,7 @@ export interface CloudPhotoItem {
   uploaderRole?: "admin" | "member";
   status?: "approved";
   createdAt: number;
+  imageVersion?: number;
 }
 
 export interface CloudSyncResponse {
@@ -42,6 +43,27 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+async function compressPhotoForUpload(input: Blob | string): Promise<Blob> {
+  const source = typeof input === "string" ? await (await fetch(input)).blob() : input;
+  try {
+    const bitmap = await createImageBitmap(source, { imageOrientation: "from-image" });
+    const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return source;
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const compressed = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.75));
+    return compressed && compressed.size < source.size ? compressed : source;
+  } catch {
+    return source;
+  }
+}
+
 /**
  * Uploads a photo to Cloud Drive
  * Photos from every authenticated account are shared immediately.
@@ -58,7 +80,8 @@ export async function uploadPhotoToCloud(
   try {
     const user = getCurrentUser();
     if (!user?.token || (expectedUserId && user.id !== expectedUserId)) return { success: false };
-    let dataUrl = typeof blobOrDataUrl === "string" ? blobOrDataUrl : await blobToDataUrl(blobOrDataUrl);
+    const compressedPhoto = await compressPhotoForUpload(blobOrDataUrl);
+    const dataUrl = await blobToDataUrl(compressedPhoto);
 
     const upload = (token: string) => fetch(serverUrl("/api/cloud/upload-photo"), {
       method: "POST",
